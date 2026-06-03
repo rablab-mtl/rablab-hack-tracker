@@ -118,29 +118,25 @@ export function evaluate(ev: ChangeEvent, opts: EvalOptions): DetectionResult {
     const m = micros(ev.newResource);
     if (m != null && m >= opts.warnMicros) {
       const daily = (m / 1_000_000).toFixed(0);
-      const isCrit = m >= opts.critMicros;
+      // A big absolute budget alone is only "worth a look" (⚠️): some clients legitimately
+      // spend a lot. The 🚨 escalation is decided by the caller from the real signals
+      // (non-human client / compromised account), not from the dollar amount by itself.
       return {
         matched: true,
-        critical: isCrit,
+        critical: false,
         rule: "campaign_big_budget",
-        headline: isCrit
-          ? `Nouveau budget de campagne GROS : ${daily} $/jour`
-          : `Nouveau budget de campagne : ${daily} $/jour`,
+        headline: `Nouveau budget de campagne : ${daily} $/jour`,
         details: [
           `Type d'operation : CAMPAIGN_BUDGET CREATE`,
-          `Budget quotidien : ${daily} $/jour`,
-          isCrit
-            ? `Au-dessus du seuil critique (${(opts.critMicros / 1_000_000).toFixed(0)} $/jour).`
-            : `Au-dessus du seuil d'alerte (${(opts.warnMicros / 1_000_000).toFixed(0)} $/jour).`,
+          `Budget quotidien : ${daily} $/jour (au-dessus du seuil de revue ${(opts.warnMicros / 1_000_000).toFixed(0)} $/jour)`,
         ],
         why:
-          "Le hack en cours cree des campagnes en automatique avec de gros budgets quotidiens " +
-          "pour bruler la depense vers les destinations de l'attaquant. Une nouvelle campagne a " +
-          "gros budget non planifiee est le signal n1 a verifier.",
+          "Le hack en cours cree des campagnes en automatique avec de gros budgets quotidiens. " +
+          "Un nouveau budget eleve merite un coup d'oeil; il devient critique s'il a ete cree par " +
+          "un script/API ou par un compte compromis (voir ci-dessus).",
         actions: [
-          "Mettre la campagne en PAUSE immediatement si elle n'est pas reconnue",
-          "Confirmer qui l'a creee et a partir de quel outil (voir le client_type)",
-          "Si non reconnue : revoquer l'acces du compte ayant servi et reset son mot de passe",
+          "Verifier que cette campagne/budget est reconnu",
+          "Si genere par script/API ou non reconnu : mettre en PAUSE, revoquer l'acces et reset le mot de passe",
         ],
       };
     }
