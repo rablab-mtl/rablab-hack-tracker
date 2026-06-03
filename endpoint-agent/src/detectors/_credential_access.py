@@ -47,7 +47,9 @@ def scan_credential_access(
         if d["sha256"]:
             details.append(f"SHA-256 : {d['sha256']}")
 
-        icon = "🚨" if d["signature"] in ("unsigned", "unknown") else "⚠️"
+        # Reading the credential store by a non-browser process is THE headline
+        # infostealer pattern: always critical. Signature is shown in the details.
+        icon = "🚨"
         alerts.append(
             Alert(
                 icon=icon,
