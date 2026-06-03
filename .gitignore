@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+.venv-test/
+
+# Node / Cloudflare
+node_modules/
+.wrangler/
+dist/
+
+# Local runtime artifacts (must never be committed)
+*.log
+*.db
+runtime.json
+config.json
+.expected_hash
+
+# Secrets (kept outside the repo, never committed)
+DEPLOY_SECRETS.local.txt
+.dev.vars

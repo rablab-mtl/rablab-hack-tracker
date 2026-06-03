@@ -1,0 +1,164 @@
+"""Detection 3: a new, suspicious autostart entry (LaunchAgent / Scheduled Task).
+
+macOS: scans LaunchAgents/LaunchDaemons plists.
+Windows: scans the registry Run keys and Scheduled Tasks.
+
+An entry is suspicious when the binary it points to lives in a temp/cache/random dir,
+or is not signed by Apple / a known developer, or the label looks random.
+"""
+from __future__ import annotations
+
+
+import datetime
+import plistlib
+import re
+import sys
+from pathlib import Path
+
+from alert import Alert
+from . import Detector
+from . import _procutil
+
+SUSPICIOUS_DIR_HINTS = (
+    "/tmp/",
+    "/private/tmp/",
+    "/var/folders/",
+    "/private/var/folders/",
+    "/.cache/",
+    "/library/application support/.",
+    "\\temp\\",
+    "\\appdata\\local\\temp\\",
+    "\\programdata\\",
+)
+
+_UUID_RE = re.compile(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}")
+_RANDOMISH_RE = re.compile(r"[a-z0-9]{12,}", re.IGNORECASE)
+
+WHY = (
+    "Installer un demarrage automatique est la facon dont un infostealer reste actif et se "
+    "relance apres un reboot. C'est un marqueur de persistence."
+)
+
+
+def _binary_suspicious(binary: str) -> tuple[bool, list[str]]:
+    reasons: list[str] = []
+    low = (binary or "").lower()
+    if any(h in low for h in SUSPICIOUS_DIR_HINTS):
+        reasons.append(f"Binaire dans un repertoire temporaire/cache : {binary}")
+    sig = _procutil.code_signature(binary)
+    if sig in ("unsigned", "unknown") and sys.platform == "darwin":
+        reasons.append("Binaire pas signe Apple ni par un developer ID connu")
+    return (bool(reasons), reasons)
+
+
+def _label_suspicious(label: str) -> bool:
+    if not label:
+        return False
+    if _UUID_RE.search(label):
+        return True
+    # A label with a long random-looking token and no dotted reverse-domain feel.
+    tail = label.split(".")[-1]
+    return bool(_RANDOMISH_RE.fullmatch(tail)) and tail.lower() not in ("helper", "agent", "daemon")
+
+
+class PersistenceDetector(Detector):
+    name = "persistence"
+    interval = 30
+
+    def run_once(self) -> list[Alert]:
+        if sys.platform == "darwin":
+            return self._scan_macos()
+        if sys.platform == "win32":
+            return self._scan_windows()
+        return []
+
+    # ----- macOS --------------------------------------------------------
+    def _scan_macos(self) -> list[Alert]:
+        dirs = [
+            Path.home() / "Library" / "LaunchAgents",
+            Path("/Library/LaunchAgents"),
+            Path("/Library/LaunchDaemons"),
+        ]
+        alerts: list[Alert] = []
+        for d in dirs:
+            if not d.exists():
+                continue
+            for plist in d.glob("*.plist"):
+                try:
+                    with open(plist, "rb") as f:
+                        data = plistlib.load(f)
+                except (OSError, plistlib.InvalidFileException, ValueError):
+                    continue
+                label = str(data.get("Label", plist.stem))
+                binary = ""
+                if isinstance(data.get("Program"), str):
+                    binary = data["Program"]
+                elif isinstance(data.get("ProgramArguments"), list) and data["ProgramArguments"]:
+                    binary = str(data["ProgramArguments"][0])
+
+                bad_bin, reasons = _binary_suspicious(binary)
+                bad_label = _label_suspicious(label)
+                if not (bad_bin or bad_label):
+                    continue
+                if bad_label:
+                    reasons.append(f"Label de plist a l'aspect aleatoire : {label}")
+
+                alerts.append(
+                    Alert(
+                        icon="⚠️",
+                        alert_type="PERSISTENCE suspecte",
+                        detector=self.name,
+                        time_hms=datetime.datetime.now().strftime("%H:%M:%S"),
+                        headline=f"Nouveau LaunchAgent/Daemon : {plist}",
+                        details=[f"Label : {label}", f"Binaire pointe : {binary or 'inconnu'}", *reasons],
+                        why=WHY,
+                        action="Verifie ce demarrage automatique. Si tu ne le reconnais pas, supprime la plist et scanne.",
+                        dedup_key=f"persistence:{plist}",
+                    )
+                )
+        return alerts
+
+    # ----- Windows ------------------------------------------------------
+    def _scan_windows(self) -> list[Alert]:
+        alerts: list[Alert] = []
+        try:
+            import winreg  # type: ignore
+        except ImportError:
+            return []
+
+        run_keys = [
+            (winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Run"),
+            (winreg.HKEY_LOCAL_MACHINE, r"Software\Microsoft\Windows\CurrentVersion\Run"),
+        ]
+        for hive, subkey in run_keys:
+            try:
+                key = winreg.OpenKey(hive, subkey)
+            except OSError:
+                continue
+            try:
+                i = 0
+                while True:
+                    try:
+                        name, value, _ = winreg.EnumValue(key, i)
+                    except OSError:
+                        break
+                    i += 1
+                    bad, reasons = _binary_suspicious(str(value))
+                    if not bad:
+                        continue
+                    alerts.append(
+                        Alert(
+                            icon="⚠️",
+                            alert_type="PERSISTENCE suspecte",
+                            detector=self.name,
+                            time_hms=datetime.datetime.now().strftime("%H:%M:%S"),
+                            headline=f"Nouvelle entree Run : {name}",
+                            details=[f"Commande : {value}", *reasons],
+                            why=WHY,
+                            action="Verifie cette entree de demarrage. Si inconnue, supprime-la et scanne.",
+                            dedup_key=f"persistence:run:{name}:{value}",
+                        )
+                    )
+            finally:
+                winreg.CloseKey(key)
+        return alerts

@@ -1,0 +1,35 @@
+{
+  // Worker rablab-gads-monitor (Module 2 du rablab-hack-tracker).
+  // Deploiement : voir gads-monitor/README.md
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "rablab-gads-monitor",
+  "main": "src/index.ts",
+  "compatibility_date": "2024-09-23",
+  "compatibility_flags": ["nodejs_compat"],
+
+  // Cron toutes les 3 minutes : scan des change_event du MCC Google Ads.
+  "triggers": {
+    "crons": ["*/3 * * * *"]
+  },
+
+  // KV : config dynamique, dedup des events, whitelist, heartbeats des agents.
+  // L'id est rempli automatiquement par "wrangler kv namespace create" (voir README).
+  "kv_namespaces": [
+    {
+      "binding": "TRACKER_KV",
+      "id": "fe3ca22fbf544076baa45ee7a9a890cc"
+    }
+  ],
+
+  // Variables non sensibles (editables ici, visibles dans le dashboard Cloudflare).
+  // CONFIDENTIALITE : la liste des emails de l'equipe, les comptes compromis et les users
+  // Google Ads attendus ne sont PAS dans le repo public. Ils sont poses comme secrets :
+  //   wrangler secret put EXPECTED_USERS         (liste des employes, page /status)
+  //   wrangler secret put COMPROMISED_ACCOUNTS   (comptes compromis -> toujours 🚨)
+  //   wrangler secret put GADS_EXPECTED_USERS    (operateurs Google Ads legitimes)
+  // Voir gads-monitor/README.md.
+  "vars": {
+    // Version de l'API Google Ads. A ajuster si Google deprecie cette version.
+    "GADS_API_VERSION": "v18"
+  }
+}

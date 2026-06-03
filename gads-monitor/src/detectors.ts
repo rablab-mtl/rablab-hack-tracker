@@ -1,0 +1,221 @@
+// detectors.ts
+// Rules that decide whether one Google Ads change_event deserves a Slack alert.
+// See brief "Criteres d'alerte (a pousser sur Slack)".
+
+export interface ChangeEvent {
+  resourceName?: string;
+  changeDateTime?: string;
+  userEmail?: string;
+  clientType?: string;
+  changeResourceType?: string;
+  changedFields?: string;
+  resourceChangeOperation?: string;
+  campaign?: string;
+  adGroup?: string;
+  oldResource?: any;
+  newResource?: any;
+}
+
+export interface DetectionResult {
+  matched: boolean;
+  rule: string; // short rule id, used for dedup context
+  headline: string;
+  details: string[];
+  why: string;
+  actions: string[];
+}
+
+const BUDGET_ALERT_MICROS = 100_000_000; // 100 $/day in micros
+
+function micros(resource: any): number | null {
+  // campaign_budget.amount_micros lives under different shapes depending on the
+  // resource snapshot; try the common paths.
+  const v =
+    resource?.campaignBudget?.amountMicros ??
+    resource?.amountMicros ??
+    resource?.campaign_budget?.amount_micros;
+  if (v == null) return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+// Returns a DetectionResult if the event matches any sensitive rule, else matched:false.
+export function evaluate(ev: ChangeEvent): DetectionResult {
+  const type = (ev.changeResourceType ?? "").toUpperCase();
+  const op = (ev.resourceChangeOperation ?? "").toUpperCase();
+  const client = (ev.clientType ?? "").toUpperCase();
+  const fields = ev.changedFields ?? "";
+
+  const no: DetectionResult = { matched: false, rule: "", headline: "", details: [], why: "", actions: [] };
+
+  // 1. Manager link created or modified.
+  if (type === "CUSTOMER_MANAGER_LINK" && (op === "CREATE" || op === "UPDATE")) {
+    return {
+      matched: true,
+      rule: "manager_link",
+      headline: `Manager link ${op} via ${ev.clientType ?? "?"}`,
+      details: [
+        `Type d'operation : CUSTOMER_MANAGER_LINK ${op}`,
+        `Client : ${ev.clientType ?? "?"}`,
+      ],
+      why:
+        "Un Manager link permet d'etendre le controle a de nouveaux comptes clients. " +
+        "C'est exactement la mecanique qu'un attaquant utilise pour s'accrocher a la structure MCC.",
+      actions: [
+        "Confirmer avec la personne qu'elle a bien fait cette operation",
+        "Si non : revoquer le Manager link et reset le mot de passe du compte concerne",
+        "Verifier que le compte lie est un client legitime",
+      ],
+    };
+  }
+
+  // 2. User added to an account.
+  if (type === "CUSTOMER_USER_ACCESS" && op === "CREATE") {
+    return {
+      matched: true,
+      rule: "user_access",
+      headline: "Nouvel utilisateur ajoute a un compte Google Ads",
+      details: [`Type d'operation : CUSTOMER_USER_ACCESS ${op}`],
+      why:
+        "Ajouter un utilisateur a un compte est une facon directe pour l'attaquant de garder un acces " +
+        "meme apres un reset de mot de passe.",
+      actions: [
+        "Verifier l'identite de l'utilisateur ajoute",
+        "Si inconnu : retirer l'acces immediatement",
+      ],
+    };
+  }
+
+  // 3. Billing / payments changes.
+  if (["BILLING_SETUP", "ACCOUNT_BUDGET", "PAYMENTS_ACCOUNT"].includes(type)) {
+    return {
+      matched: true,
+      rule: "billing",
+      headline: `Changement billing/payments (${type} ${op})`,
+      details: [`Type d'operation : ${type} ${op}`],
+      why:
+        "Les changements de facturation peuvent rediriger les depenses ou ouvrir des budgets " +
+        "que l'attaquant exploitera pour des campagnes frauduleuses.",
+      actions: [
+        "Confirmer le changement de facturation avec la direction",
+        "Verifier le moyen de paiement et le budget de compte",
+      ],
+    };
+  }
+
+  // 4. New campaign with a daily budget above 100 $/day.
+  if (type === "CAMPAIGN" && op === "CREATE") {
+    const m = micros(ev.newResource);
+    if (m != null && m > BUDGET_ALERT_MICROS) {
+      return {
+        matched: true,
+        rule: "campaign_big_budget",
+        headline: `Nouvelle campagne avec budget eleve (${(m / 1_000_000).toFixed(2)} $/jour)`,
+        details: [
+          `Type d'operation : CAMPAIGN CREATE`,
+          `Budget : ${(m / 1_000_000).toFixed(2)} $/jour`,
+        ],
+        why:
+          "Une nouvelle campagne a gros budget est le payload typique d'un compte compromis : " +
+          "l'attaquant brule le budget vers ses propres destinations.",
+        actions: [
+          "Mettre la campagne en pause immediatement si non reconnue",
+          "Confirmer avec la personne qui l'aurait creee",
+        ],
+      };
+    }
+  }
+
+  // 5. Budget increase of more than 50%.
+  if (type === "CAMPAIGN_BUDGET" && op === "UPDATE") {
+    const oldM = micros(ev.oldResource);
+    const newM = micros(ev.newResource);
+    if (oldM != null && newM != null && oldM > 0 && newM > oldM * 1.5) {
+      const pct = (((newM - oldM) / oldM) * 100).toFixed(0);
+      return {
+        matched: true,
+        rule: "budget_increase",
+        headline: `Augmentation de budget de +${pct}%`,
+        details: [
+          `Ancien budget : ${(oldM / 1_000_000).toFixed(2)} $/jour`,
+          `Nouveau budget : ${(newM / 1_000_000).toFixed(2)} $/jour`,
+        ],
+        why:
+          "Une hausse brutale de budget est une facon discrete d'augmenter la depense frauduleuse " +
+          "sans creer de nouvelle campagne visible.",
+        actions: [
+          "Verifier que la hausse est legitime",
+          "Si non : remettre l'ancien budget et investiguer le compte",
+        ],
+      };
+    }
+  }
+
+  // 6. Paused campaign re-enabled.
+  if (type === "CAMPAIGN" && op === "UPDATE" && fields.includes("status")) {
+    const oldStatus = (ev.oldResource?.campaign?.status ?? ev.oldResource?.status ?? "").toUpperCase();
+    const newStatus = (ev.newResource?.campaign?.status ?? ev.newResource?.status ?? "").toUpperCase();
+    if (oldStatus === "PAUSED" && newStatus === "ENABLED") {
+      return {
+        matched: true,
+        rule: "campaign_reactivated",
+        headline: "Campagne en pause reactivee",
+        details: ["Statut : PAUSED -> ENABLED"],
+        why:
+          "Reactiver une vieille campagne en pause est un moyen de relancer une depense sans " +
+          "creer de campagne nouvelle qui attirerait l'oeil.",
+        actions: ["Confirmer la reactivation", "Si non reconnue : remettre en pause et investiguer"],
+      };
+    }
+  }
+
+  // 7. Conversion action created.
+  if (type === "CONVERSION_ACTION" && op === "CREATE") {
+    return {
+      matched: true,
+      rule: "conversion_action",
+      headline: "Nouvelle conversion action creee",
+      details: [`Type d'operation : CONVERSION_ACTION ${op}`],
+      why:
+        "Les conversions fraudees servent a tromper le Smart Bidding pour qu'il pousse la depense " +
+        "vers les pages de l'attaquant.",
+      actions: ["Verifier la conversion action et sa source"],
+    };
+  }
+
+  // 8. client_type GOOGLE_ADS_API or OTHER (rare chez Rablab, toujours a verifier).
+  if (client === "GOOGLE_ADS_API" || client === "OTHER") {
+    return {
+      matched: true,
+      rule: "api_client",
+      headline: `Operation via client externe : ${ev.clientType}`,
+      details: [
+        `Type d'operation : ${type} ${op}`,
+        `Client : ${ev.clientType}`,
+      ],
+      why:
+        "Les operations par API ou outil externe sont rares chez Rablab. Un attaquant qui pilote " +
+        "le compte par script utilisera ce canal.",
+      actions: ["Identifier l'outil/script a l'origine de cette operation"],
+    };
+  }
+
+  // 9. Bulk / CSV upload (pattern Tristan du 1er juin).
+  if (client.includes("BULK") || fields.includes("Generated sheet") || client.includes("LOCAL_FILE")) {
+    return {
+      matched: true,
+      rule: "bulk_upload",
+      headline: "Operation bulk / upload CSV",
+      details: [
+        `Type d'operation : ${type} ${op}`,
+        `Client : ${ev.clientType}`,
+      ],
+      why:
+        "Un upload CSV / bulk peut creer ou modifier en masse des liens, budgets ou campagnes " +
+        "d'un coup. C'est le pattern observe le 1er juin.",
+      actions: ["Recuperer le fichier uploade et verifier chaque ligne"],
+    };
+  }
+
+  return no;
+}

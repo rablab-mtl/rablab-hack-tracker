@@ -1,0 +1,54 @@
+===================================================================
+   RABLAB HACK TRACKER - Ce que cet outil fait, ce qu'il ne fait pas
+===================================================================
+
+Rablab a un incident de securite actif sur Google Ads (depuis le 21 mai).
+On essaie d'identifier quel ordi de l'equipe est infecte par un virus
+qui vole les mots de passe Google Ads. Cet outil aide a le trouver.
+
+Voici EXACTEMENT ce qu'il surveille sur ton ordi (Mac ou PC) :
+
+  - Si un programme INCONNU tente de lire le fichier de cookies ou de
+    mots de passe de Chrome (= signature classique d'un voleur de mots
+    de passe). L'outil regarde QUEL programme ouvre ce fichier, pas son
+    contenu.
+  - Si un programme s'installe pour demarrer automatiquement
+    (= mecanisme typique pour rester cache sur ton ordi).
+  - Si une extension Chrome recente demande des permissions sensibles
+    (lecture des cookies, de toutes les pages, etc.).
+  - Si un programme non signe tourne depuis un dossier temporaire
+    (= pattern des faux installeurs).
+  - Si une connexion reseau part vers un serveur malveillant connu
+    (liste publique de serveurs de pirates, abuse.ch). L'outil compare
+    seulement les adresses IP de destination a cette liste.
+
+Voici tout ce que cet outil NE FAIT PAS (jamais, verifie le code source) :
+
+  - Il ne lit pas les URLs que tu visites.
+  - Il ne lit pas le contenu de tes fichiers personnels (documents,
+    photos, telechargements, courriels).
+  - Il n'enregistre pas tes mots de passe ni tes frappes clavier.
+  - Il n'enregistre pas ton historique de navigation.
+  - Il ne lit pas tes messages, courriels, conversations.
+  - Il ne capte pas ton ecran, ta camera, ton micro.
+  - Il ne fait aucune capture d'ecran.
+  - Il ne regarde pas quel compte Google est connecte dans Chrome.
+  - Il ne surveille pas les apps que tu utilises personnellement
+    (musique, photos, Netflix, jeux, banque, etc.).
+  - Il ne tracke pas ta geolocalisation.
+
+Quand un comportement suspect est detecte, une alerte (et UNIQUEMENT
+cette alerte, jamais le contenu de tes donnees) est envoyee dans un canal
+Slack prive entre Julien Capuano et la direction Rablab. Personne d'autre
+dans l'equipe n'a acces a ces alertes.
+
+Le code source est public et verifiable :
+https://github.com/rablab-mtl/rablab-hack-tracker
+
+Tu peux desinstaller a TOUT moment, sans demander a personne :
+  rablab-hack-tracker uninstall
+
+Conforme Loi 25 (Quebec) : aucune donnee personnelle de ton activite
+n'est collectee, consentement explicite, droit de retrait immediat.
+
+===================================================================
