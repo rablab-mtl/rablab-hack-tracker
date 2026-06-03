@@ -16,6 +16,10 @@ Start-Transcript -Path $LogPath -Force | Out-Null
 try {
   Write-Host "=== rablab-hack-tracker : installation (Windows) ==="
 
+  # PowerShell par defaut est en "Restricted", ce qui bloque uv et certains outils.
+  # On passe en Bypass UNIQUEMENT pour ce processus : non permanent, sans droits admin.
+  try { Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force } catch { }
+
   # 1. Obtenir Python 3.9+ en UNE etape. uv en secours (sans winget, sans Microsoft Store, sans git).
   $PyExe = $null
   foreach ($c in @("py -3.13","py -3.12","py -3.11","py -3.10","py -3.9")) {
