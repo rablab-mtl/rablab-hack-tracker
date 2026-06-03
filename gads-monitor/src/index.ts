@@ -48,6 +48,7 @@ export interface Env {
   // Secrets (wrangler secret put)
   SLACK_WEBHOOK_URL: string; // seed; live value lives in KV config and is rotatable
   ADMIN_TOKEN: string;
+  STATUS_TOKEN?: string; // read-only token for /status (share-safe, cannot change config)
   AGENT_SHARED_TOKEN: string;
   WHITELIST_SIGNING_KEY: string;
 
@@ -297,8 +298,13 @@ async function handleFetch(req: Request, env: Env): Promise<Response> {
   }
 
   // /status : dashboard live des heartbeats vs employes attendus.
+  // Accepts the read-only STATUS_TOKEN as well as the ADMIN_TOKEN, so the dashboard
+  // can be shared without granting access to /admin or the kill switch.
   if (path === "/status") {
-    if (!timingSafeEqual(token, env.ADMIN_TOKEN)) {
+    const okStatus =
+      timingSafeEqual(token, env.ADMIN_TOKEN) ||
+      (env.STATUS_TOKEN ? timingSafeEqual(token, env.STATUS_TOKEN) : false);
+    if (!okStatus) {
       return new Response("forbidden", { status: 403 });
     }
     const now = new Date();
