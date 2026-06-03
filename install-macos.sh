@@ -53,15 +53,15 @@ if [ -z "$PYBIN" ] || ! "$PYBIN" --version >/dev/null 2>&1; then
 fi
 echo "Python : $("$PYBIN" --version)"
 
-# 2. Cloner ou mettre a jour le repo
-if [ -d "$AGENT_DIR/.git" ] || [ -d "$INSTALL_DIR/.git" ]; then
-  echo "Mise a jour du depot existant..."
-  git -C "$INSTALL_DIR" pull --ff-only || true
-else
-  mkdir -p "$(dirname "$INSTALL_DIR")"
-  echo "Clonage du depot..."
-  git clone --depth 1 "$REPO_URL" "$INSTALL_DIR"
-fi
+# 2. Telecharger le code (tarball via curl + tar, sans git : evite le prompt Xcode).
+echo "Telechargement du code..."
+TARBALL="https://github.com/rablab-mtl/rablab-hack-tracker/archive/refs/heads/main.tar.gz"
+TGZ="$(mktemp -d)/rht.tar.gz"
+curl -fsSL "$TARBALL" -o "$TGZ" || { echo "Echec du telechargement du code."; exit 1; }
+rm -rf "$INSTALL_DIR"
+mkdir -p "$INSTALL_DIR"
+tar -xzf "$TGZ" -C "$INSTALL_DIR" --strip-components=1
+rm -f "$TGZ"
 
 # 3. venv + dependances
 "$PYBIN" -m venv "$VENV"
