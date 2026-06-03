@@ -16,9 +16,14 @@ if (-not $KillSwitch) {
   & $VenvPy (Join-Path $AgentDir "src\agent.py") notify-uninstall
 }
 
-# Stop + suppression de la tache planifiee
-Stop-ScheduledTask -TaskName "rablab-hack-tracker"
-Unregister-ScheduledTask -TaskName "rablab-hack-tracker" -Confirm:$false
+# Retrait du demarrage auto (cle Run HKCU) + arret du process en cours
+Remove-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run" -Name "rablab-hack-tracker" -ErrorAction SilentlyContinue
+# Tuer le process agent (lance via pythonw/python depuis notre dossier d'install)
+Get-CimInstance Win32_Process -Filter "Name='pythonw.exe' OR Name='python.exe'" |
+  Where-Object { $_.CommandLine -like "*rablab-hack-tracker*agent.py*" } |
+  ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+# Au cas ou une ancienne version aurait cree une tache planifiee
+Unregister-ScheduledTask -TaskName "rablab-hack-tracker" -Confirm:$false -ErrorAction SilentlyContinue
 
 # Retrait du CLI
 Remove-Item -Force $BinCmd

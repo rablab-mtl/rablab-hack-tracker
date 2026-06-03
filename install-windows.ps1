@@ -81,7 +81,8 @@ try {
   } else {
     # 6. Config locale
     $cfg = @{ email = $Email; device_label = $env:COMPUTERNAME; worker_url = $WorkerUrl } | ConvertTo-Json
-    Set-Content -Path (Join-Path $InstallDir "config.json") -Value $cfg -Encoding UTF8
+    # Ecrire SANS BOM : Python lit le JSON en utf-8, un BOM le ferait echouer.
+    [System.IO.File]::WriteAllText((Join-Path $InstallDir "config.json"), $cfg, (New-Object System.Text.UTF8Encoding($false)))
 
     # 7. Finaliser l'install (fetch config, hash, message Slack d'install)
     & $VenvPy (Join-Path $AgentDir "src\agent.py") install
@@ -93,12 +94,15 @@ try {
            "`"$VenvPy`" `"$AgentDir\src\agent.py`" %1`r`n"
     Set-Content -Path (Join-Path $BinDir "rablab-hack-tracker.cmd") -Value $cmd -Encoding ASCII
 
-    # 9. Tache planifiee au logon (relance la session de monitoring)
-    $action  = New-ScheduledTaskAction -Execute $VenvPy -Argument "`"$AgentDir\src\agent.py`" run"
-    $trigger = New-ScheduledTaskTrigger -AtLogOn
-    $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)
-    Register-ScheduledTask -TaskName "rablab-hack-tracker" -Action $action -Trigger $trigger -Settings $settings -Force | Out-Null
-    Start-ScheduledTask -TaskName "rablab-hack-tracker"
+    # 9. Demarrage auto au logon via la cle Run (HKCU, sans admin, contrairement aux
+    #    taches planifiees souvent bloquees par la politique d'org) + lancement immediat.
+    #    pythonw.exe = pas de fenetre console qui s'ouvre.
+    $VenvPyw = Join-Path $Venv "Scripts\pythonw.exe"
+    if (-not (Test-Path $VenvPyw)) { $VenvPyw = $VenvPy }  # repli si pythonw absent
+    $AgentPy = Join-Path $AgentDir "src\agent.py"
+    $runValue = '"' + $VenvPyw + '" "' + $AgentPy + '" run'
+    Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run" -Name "rablab-hack-tracker" -Value $runValue
+    Start-Process -FilePath $VenvPyw -ArgumentList @($AgentPy, "run") -WindowStyle Hidden
 
     Write-Host ""
     Write-Host "Installation terminee. Tu verras une confirmation dans le canal Slack."

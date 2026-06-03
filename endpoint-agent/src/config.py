@@ -69,7 +69,8 @@ def load_local_config() -> dict:
     if not p.exists():
         return {}
     try:
-        return json.loads(p.read_text(encoding="utf-8"))
+        # utf-8-sig tolerates a BOM (PowerShell on Windows writes UTF-8 with a BOM).
+        return json.loads(p.read_text(encoding="utf-8-sig"))
     except (json.JSONDecodeError, OSError):
         return {}
 
@@ -83,7 +84,8 @@ def load_runtime_config() -> dict:
     if not p.exists():
         return {}
     try:
-        return json.loads(p.read_text(encoding="utf-8"))
+        # utf-8-sig tolerates a BOM (PowerShell on Windows writes UTF-8 with a BOM).
+        return json.loads(p.read_text(encoding="utf-8-sig"))
     except (json.JSONDecodeError, OSError):
         return {}
 
