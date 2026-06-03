@@ -32,7 +32,6 @@ SUSPICIOUS_DIR_HINTS = (
 )
 
 _UUID_RE = re.compile(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}")
-_RANDOMISH_RE = re.compile(r"[a-z0-9]{12,}", re.IGNORECASE)
 
 WHY = (
     "Installer un demarrage automatique est la facon dont un infostealer reste actif et se "
@@ -60,13 +59,10 @@ def _binary_suspicious(binary: str) -> tuple[bool, list[str]]:
 
 
 def _label_suspicious(label: str) -> bool:
-    if not label:
-        return False
-    if _UUID_RE.search(label):
-        return True
-    # A label with a long random-looking token and no dotted reverse-domain feel.
-    tail = label.split(".")[-1]
-    return bool(_RANDOMISH_RE.fullmatch(tail)) and tail.lower() not in ("helper", "agent", "daemon")
+    # Only a UUID-like label is a reliable signal. The previous length-based heuristic
+    # flagged legit names like com.adobe.AdobeCreativeCloud, so it is removed. The strong
+    # signal for persistence is the binary location (temp/cache dir), handled above.
+    return bool(label) and bool(_UUID_RE.search(label))
 
 
 class PersistenceDetector(Detector):
@@ -111,7 +107,7 @@ class PersistenceDetector(Detector):
                 if not (bad_bin or bad_label):
                     continue
                 if bad_label:
-                    reasons.append(f"Label de plist a l'aspect aleatoire : {label}")
+                    reasons.append(f"Label de plist en forme d'UUID : {label}")
 
                 alerts.append(
                     Alert(

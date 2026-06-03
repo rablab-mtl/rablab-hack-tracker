@@ -39,8 +39,13 @@ from detectors.persistence import PersistenceDetector
 from detectors.suspicious_install import SuspiciousInstallDetector
 from detectors.tamper import TamperDetector
 
-# These signal active credential theft; they are never downgraded by learning mode.
-CRITICAL_DETECTORS = {"cookies_access", "passwords_access", "c2_connections", "tamper"}
+# High-confidence signals: never downgraded to 🔵 by learning mode, even in the first 24h.
+# A hidden/unsigned binary in a temp dir, or a temp-dir LaunchAgent, is never "normal
+# baseline" - it is exactly what we hunt - so these alert at full severity immediately.
+CRITICAL_DETECTORS = {
+    "cookies_access", "passwords_access", "c2_connections", "tamper",
+    "suspicious_install", "persistence",
+}
 LEARNING_WINDOW_SECONDS = 24 * 3600
 
 IOC_REFRESH_SECONDS = 4 * 3600
