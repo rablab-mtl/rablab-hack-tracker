@@ -1,40 +1,46 @@
-"""Detection 6: a recently installed Chrome extension with sensitive permissions,
-especially one not served from the official Chrome Web Store update URL.
-Cookie-stealing extensions are a common, quiet infostealer vector.
-"""
-from __future__ import annotations
+"""Detection 6: a browser extension that can steal cookies AND is served from outside
+the official Chrome Web Store (sideloaded / external update server).
 
+The strong, low-noise signal is "off-store + sensitive permission". Extensions from the
+Web Store (update_url on clients2.google.com) are reviewed by Google and are NOT flagged,
+even if they legitimately use cookies/tabs (MozBar, HubSpot, wallets, etc.). Cookie-stealer
+extensions are almost always sideloaded with their own update server.
+"""
+
+from __future__ import annotations
 
 import datetime
 import json
-import time
 from pathlib import Path
+from urllib.parse import urlparse
 
 from alert import Alert
 from . import Detector
 from . import _procutil
 
-SENSITIVE_PERMS = {"cookies", "webRequest", "<all_urls>", "tabs", "proxy", "webRequestBlocking"}
-OFFICIAL_UPDATE_URL = "https://clients2.google.com/service/update2/crx"
-RECENT_DAYS = 60
+# Permissions that let an extension read sessions / all pages. 'tabs' is intentionally
+# excluded: it is extremely common and low-risk on its own.
+SENSITIVE_PERMS = {"cookies", "<all_urls>", "webRequest", "webRequestBlocking", "proxy"}
+
+# Any scheme on this host is the official Chrome Web Store updater.
+STORE_HOST = "clients2.google.com"
 
 
 def _read_manifest(ext_dir: Path) -> tuple[dict, Path] | None:
-    # ext_dir/<version>/manifest.json ; pick the most recent version folder.
     versions = [p for p in ext_dir.iterdir() if p.is_dir()] if ext_dir.exists() else []
     versions.sort(key=lambda p: p.stat().st_mtime, reverse=True)
     for v in versions:
         mf = v / "manifest.json"
         if mf.exists():
             try:
-                return json.loads(mf.read_text(encoding="utf-8", errors="ignore")), mf
+                return json.loads(mf.read_text(encoding="utf-8", errors="ignore")), v
             except (OSError, json.JSONDecodeError):
                 continue
     return None
 
 
 def _all_permissions(manifest: dict) -> set[str]:
-    perms = set()
+    perms: set[str] = set()
     for key in ("permissions", "optional_permissions", "host_permissions"):
         val = manifest.get(key)
         if isinstance(val, list):
@@ -42,13 +48,43 @@ def _all_permissions(manifest: dict) -> set[str]:
     return perms
 
 
+def _is_store(update_url: str) -> bool:
+    """True if the extension updates from the official Web Store (any scheme)."""
+    if not update_url:
+        return False
+    try:
+        return (urlparse(update_url).hostname or "").lower() == STORE_HOST
+    except ValueError:
+        return False
+
+
+def _resolve_name(manifest: dict, version_dir: Path) -> str:
+    """Resolve __MSG_xxx__ i18n placeholders to the real localized name."""
+    name = str(manifest.get("name", ""))
+    if not name.startswith("__MSG_"):
+        return name or version_dir.parent.name
+    key = name[len("__MSG_") :].rstrip("_")
+    locale = str(manifest.get("default_locale", "en"))
+    for loc in (locale, "en", "en_US"):
+        msg = version_dir / "_locales" / loc / "messages.json"
+        if msg.exists():
+            try:
+                data = json.loads(msg.read_text(encoding="utf-8", errors="ignore"))
+                # message keys are case-insensitive in Chrome
+                for k, v in data.items():
+                    if k.lower() == key.lower() and isinstance(v, dict) and "message" in v:
+                        return str(v["message"])
+            except (OSError, json.JSONDecodeError):
+                continue
+    return version_dir.parent.name  # fall back to the extension id
+
+
 class BrowserExtensionsDetector(Detector):
     name = "browser_extensions"
-    interval = 300  # extensions change rarely; check every 5 min
+    interval = 300
 
     def run_once(self) -> list[Alert]:
         alerts: list[Alert] = []
-        cutoff = time.time() - RECENT_DAYS * 86400
         for base in _procutil.chrome_base_dirs():
             for prof in base.iterdir() if base.exists() else []:
                 ext_root = prof / "Extensions"
@@ -57,55 +93,45 @@ class BrowserExtensionsDetector(Detector):
                 for ext_dir in ext_root.iterdir():
                     if not ext_dir.is_dir():
                         continue
-                    alert = self._check_extension(ext_dir, cutoff)
+                    alert = self._check_extension(ext_dir)
                     if alert:
                         alerts.append(alert)
         return alerts
 
-    def _check_extension(self, ext_dir: Path, cutoff: float) -> Alert | None:
+    def _check_extension(self, ext_dir: Path) -> Alert | None:
         ext_id = ext_dir.name
-        try:
-            recent = ext_dir.stat().st_mtime >= cutoff
-        except OSError:
-            recent = False
-
         parsed = _read_manifest(ext_dir)
         if not parsed:
             return None
-        manifest, _mf = parsed
-        perms = _all_permissions(manifest)
-        sensitive = perms & SENSITIVE_PERMS
+        manifest, version_dir = parsed
+
+        sensitive = _all_permissions(manifest) & SENSITIVE_PERMS
         if not sensitive:
             return None
 
         update_url = str(manifest.get("update_url", ""))
-        off_store = bool(update_url) and update_url != OFFICIAL_UPDATE_URL
-
-        # Alert when it is recent OR served from outside the official store.
-        if not (recent or off_store):
+        # Only flag extensions served from OUTSIDE the official Web Store. Store extensions
+        # (and those with no external updater) are not the cookie-stealer pattern.
+        if not update_url or _is_store(update_url):
             return None
 
-        name = str(manifest.get("name", ext_id))
-        details = [
-            f"Extension : {name} (id : {ext_id})",
-            f"Permissions sensibles : {', '.join(sorted(sensitive))}",
-            f"Update URL : {update_url or '(absente)'}"
-            + ("" if not off_store else " (hors Chrome Web Store)"),
-        ]
-        if recent:
-            details.append("Installee recemment (< 60 jours).")
-
+        name = _resolve_name(manifest, version_dir)
         return Alert(
-            icon="🚨" if off_store else "⚠️",
+            icon="🚨",
             alert_type="EXTENSION suspecte",
             detector=self.name,
             time_hms=datetime.datetime.now().strftime("%H:%M:%S"),
-            headline=f"Extension Chrome a permissions sensibles : {name}",
-            details=details,
+            headline=f"Extension HORS Chrome Web Store avec acces aux cookies : {name}",
+            details=[
+                f"Extension : {name} (id : {ext_id})",
+                f"Permissions sensibles : {', '.join(sorted(sensitive))}",
+                f"Update URL : {update_url} (serveur externe, PAS le Chrome Web Store)",
+            ],
             why=(
-                "Une extension qui peut lire les cookies et toutes les pages peut voler les sessions "
-                "Google Ads directement depuis le navigateur, sans toucher au disque."
+                "Une extension installee hors du Chrome Web Store et capable de lire les cookies "
+                "peut voler les sessions Google Ads directement dans le navigateur. C'est un "
+                "vecteur classique d'infostealer."
             ),
-            action="Verifie cette extension. Si tu ne la reconnais pas, desinstalle-la depuis chrome://extensions.",
+            action="Verifie cette extension dans chrome://extensions. Si tu ne l'as pas installee volontairement, desinstalle-la et scanne.",
             dedup_key=f"extension:{ext_id}",
         )

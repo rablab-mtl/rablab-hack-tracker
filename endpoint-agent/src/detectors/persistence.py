@@ -40,15 +40,23 @@ WHY = (
 )
 
 
+# Our own agent's autostart entry; never flag ourselves.
+SELF_LABEL = "com.rablab.hacktracker"
+
+
 def _binary_suspicious(binary: str) -> tuple[bool, list[str]]:
-    reasons: list[str] = []
-    low = (binary or "").lower()
-    if any(h in low for h in SUSPICIOUS_DIR_HINTS):
-        reasons.append(f"Binaire dans un repertoire temporaire/cache : {binary}")
-    sig = _procutil.code_signature(binary)
-    if sig in ("unsigned", "unknown") and sys.platform == "darwin":
-        reasons.append("Binaire pas signe Apple ni par un developer ID connu")
-    return (bool(reasons), reasons)
+    # Only a binary living in a temp/cache/random dir is a real persistence signal.
+    # "unsigned" alone is far too noisy on macOS (legit helpers, scripts, Homebrew, etc.),
+    # and an empty/unknown binary path is never treated as suspicious.
+    if not binary:
+        return (False, [])
+    low = binary.lower()
+    if not any(h in low for h in SUSPICIOUS_DIR_HINTS):
+        return (False, [])
+    reasons = [f"Binaire dans un repertoire temporaire/cache : {binary}"]
+    if sys.platform == "darwin" and _procutil.code_signature(binary) in ("unsigned", "unknown"):
+        reasons.append("et pas signe Apple / developer ID connu")
+    return (True, reasons)
 
 
 def _label_suspicious(label: str) -> bool:
@@ -90,6 +98,8 @@ class PersistenceDetector(Detector):
                 except (OSError, plistlib.InvalidFileException, ValueError):
                     continue
                 label = str(data.get("Label", plist.stem))
+                if label == SELF_LABEL:
+                    continue  # never flag our own agent
                 binary = ""
                 if isinstance(data.get("Program"), str):
                     binary = data["Program"]
