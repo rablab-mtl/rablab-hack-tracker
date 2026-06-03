@@ -56,8 +56,8 @@ class SuspiciousInstallDetector(Detector):
                 continue
 
             sig = _procutil.code_signature(exe)
-            if sig in ("apple", "developer"):
-                continue  # signed binary from temp is unusual but not alone alarming
+            if _procutil.signature_trusted(sig):
+                continue  # validly signed binary from temp is unusual but not alone alarming
 
             d = _procutil.proc_details(proc)
             parent_is_installer = (d["parent"] or "").lower() in INSTALLER_PARENTS

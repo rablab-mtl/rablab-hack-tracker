@@ -31,7 +31,7 @@ def scan_credential_access(
         # Trust a whitelisted name ONLY if the binary is properly signed. Malware commonly
         # masquerades under a legit system process name (e.g. mdworker_shared) from a user
         # directory; that copy is not Apple-signed, so we still alert on it.
-        if _procutil.is_whitelisted_proc(name) and d["signature"] in ("apple", "developer"):
+        if _procutil.is_whitelisted_proc(name) and _procutil.signature_trusted(d["signature"]):
             continue
 
         # dedup_key on the binary hash when we have it, else the exe path.
@@ -46,7 +46,7 @@ def scan_credential_access(
         ]
         if _procutil.is_whitelisted_proc(name):
             details.append(
-                f"ATTENTION : se fait passer pour le processus systeme {name} mais n'est pas signe Apple."
+                f"ATTENTION : se fait passer pour le processus connu {name} mais sa signature n'est pas valide."
             )
         if d["sha256"]:
             details.append(f"SHA-256 : {d['sha256']}")
@@ -74,6 +74,7 @@ def _sig_label(sig: str) -> str:
     return {
         "apple": "signe Apple",
         "developer": "signe developer ID",
+        "signed": "signe (editeur valide)",
         "unsigned": "PAS signe (suspect)",
         "unknown": "indeterminee",
     }.get(sig, sig)

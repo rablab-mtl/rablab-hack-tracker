@@ -44,6 +44,15 @@ WHITELIST_PROC_NAMES = {
 
 _MAX_HASH_BYTES = 50 * 1024 * 1024  # do not hash anything bigger than 50 MB
 
+# Cache of binary path -> signature verdict, so we do not re-run codesign /
+# Get-AuthenticodeSignature on every poll for the same binary.
+_SIG_CACHE: dict[str, str] = {}
+
+
+def signature_trusted(sig: str) -> bool:
+    """A binary is trusted if it is validly signed, on either OS."""
+    return sig in ("apple", "developer", "signed")
+
 
 def chrome_base_dirs() -> list[Path]:
     """Root 'User Data' dirs for Chromium-family browsers, per OS."""
@@ -123,30 +132,50 @@ def sha256_file(path: str) -> str | None:
 
 
 def code_signature(exe: str) -> str:
-    """Returns 'apple', 'developer', 'unsigned' or 'unknown' for a binary.
+    """Returns 'apple', 'developer', 'signed', 'unsigned' or 'unknown' for a binary.
 
-    macOS uses codesign. Windows/Linux return 'unknown' (cheap, avoids heavy calls);
-    the alert still fires on the credential-file read itself."""
-    if not exe or sys.platform != "darwin":
+    macOS uses codesign; Windows uses Authenticode (Get-AuthenticodeSignature).
+    Results are cached per path. 'signed' means a valid signature on Windows."""
+    if not exe:
         return "unknown"
+    if exe in _SIG_CACHE:
+        return _SIG_CACHE[exe]
+    sig = _compute_signature(exe)
+    _SIG_CACHE[exe] = sig
+    return sig
+
+
+def _compute_signature(exe: str) -> str:
     try:
-        r = subprocess.run(
-            ["codesign", "-dv", "--verbose=2", exe],
-            capture_output=True,
-            text=True,
-            timeout=8,
-        )
-        info = (r.stderr or "") + (r.stdout or "")
-        if r.returncode != 0:
-            return "unsigned"
-        low = info.lower()
-        if "authority=apple" in low or "authority=software signing" in low:
-            return "apple"
-        if "authority=developer id" in low:
-            return "developer"
-        return "developer" if "authority=" in low else "unsigned"
+        if sys.platform == "darwin":
+            r = subprocess.run(
+                ["codesign", "-dv", "--verbose=2", exe],
+                capture_output=True, text=True, timeout=8,
+            )
+            info = ((r.stderr or "") + (r.stdout or "")).lower()
+            if r.returncode != 0:
+                return "unsigned"
+            if "authority=apple" in info or "authority=software signing" in info:
+                return "apple"
+            if "authority=developer id" in info:
+                return "developer"
+            return "developer" if "authority=" in info else "unsigned"
+        if sys.platform == "win32":
+            # Authenticode status: Valid / NotSigned / HashMismatch / NotTrusted / ...
+            r = subprocess.run(
+                ["powershell", "-NoProfile", "-NonInteractive", "-Command",
+                 f'(Get-AuthenticodeSignature -LiteralPath "{exe}").Status'],
+                capture_output=True, text=True, timeout=20,
+            )
+            status = (r.stdout or "").strip()
+            if status == "Valid":
+                return "signed"
+            if status == "NotSigned":
+                return "unsigned"
+            return "unknown"
     except (subprocess.SubprocessError, OSError):
         return "unknown"
+    return "unknown"
 
 
 def proc_details(proc: psutil.Process) -> dict:
