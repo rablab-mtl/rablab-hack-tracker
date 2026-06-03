@@ -65,6 +65,7 @@ export interface Env {
   GADS_API_VERSION: string;
   GADS_BUDGET_WARN_DAILY?: string; // daily budget ($) at/above which a new campaign alerts ⚠️
   GADS_BUDGET_CRIT_DAILY?: string; // daily budget ($) at/above which it is forced 🚨
+  GADS_BUDGET_SPIKE_FACTOR?: string; // budget multiplied by >= this in one update -> 🚨 (default 2)
   GADS_SCAN_BATCH?: string; // accounts scanned per cron tick (subrequest budget)
 }
 
@@ -441,8 +442,9 @@ async function runGadsScan(env: Env, now: Date): Promise<void> {
   const expectedUsers = csv(env.GADS_EXPECTED_USERS);
   const origin = "https://rablab-gads-monitor.rablab.workers.dev";
   const evalOpts = {
-    warnMicros: Number(env.GADS_BUDGET_WARN_DAILY || "300") * 1_000_000,
-    critMicros: Number(env.GADS_BUDGET_CRIT_DAILY || "1000") * 1_000_000,
+    warnMicros: Number(env.GADS_BUDGET_WARN_DAILY || "1000") * 1_000_000,
+    critMicros: Number(env.GADS_BUDGET_CRIT_DAILY || "5000") * 1_000_000,
+    spikeFactor: Number(env.GADS_BUDGET_SPIKE_FACTOR || "2"),
   };
 
   for (const acct of batch) {

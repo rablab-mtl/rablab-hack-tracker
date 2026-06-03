@@ -31,7 +31,8 @@ export interface DetectionResult {
 // daily budgets (~4500 $/day), so a high "critical" tier is the real smoking gun.
 export interface EvalOptions {
   warnMicros: number; // at/above this on a new campaign -> alert ⚠️
-  critMicros: number; // at/above this -> force 🚨 (auto-created big-budget campaign)
+  critMicros: number; // at/above this -> force 🚨 (absolute backstop)
+  spikeFactor: number; // budget multiplied by at least this in one update -> 🚨 (default 2 = doubled)
 }
 
 function micros(resource: any): number | null {
@@ -148,10 +149,10 @@ export function evaluate(ev: ChangeEvent, opts: EvalOptions): DetectionResult {
     const newM = micros(ev.newResource);
     if (oldM != null && newM != null && oldM > 0 && newM > oldM * 1.5) {
       const pct = (((newM - oldM) / oldM) * 100).toFixed(0);
-      // Drastic = more than tripled (relative), OR above the absolute critical backstop.
-      // Relative is the priority signal: a small budget suddenly exploding is suspicious
-      // even if the absolute number is modest.
-      const isCrit = newM > oldM * 3 || newM >= opts.critMicros;
+      // Drastic = multiplied by at least spikeFactor (default 2 = doubled), OR above the
+      // absolute backstop. Relative is the priority signal: a budget suddenly exploding is
+      // suspicious even if the absolute number is modest.
+      const isCrit = newM >= oldM * opts.spikeFactor || newM >= opts.critMicros;
       return {
         matched: true,
         critical: isCrit,
