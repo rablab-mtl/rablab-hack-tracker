@@ -14,22 +14,29 @@ from alert import Alert
 from . import Detector
 
 
-def _connections() -> list:
-    """All inet connections, with a fallback when system-wide access is denied."""
+def _remote_endpoints() -> list[tuple[str, int | None, str | None]]:
+    """Returns (remote_ip, pid, process_name) for every active outbound connection.
+
+    Tries the system-wide call first. On macOS without root that is denied, so we fall
+    back to iterating per-process connections. Note: system-wide returns 'sconn' tuples
+    (which carry a pid), while per-process returns 'pconn' tuples (no pid field) - so we
+    must take the pid from the process we are iterating, never from the connection."""
+    out: list[tuple[str, int | None, str | None]] = []
     try:
-        return psutil.net_connections(kind="inet")
+        for c in psutil.net_connections(kind="inet"):
+            if c.raddr:
+                out.append((c.raddr.ip, c.pid, None))
+        return out
     except (psutil.AccessDenied, PermissionError, OSError):
         pass
-    # Fallback: only the current user's own processes (no elevated privileges needed).
-    conns = []
-    for proc in psutil.process_iter():
+    for proc in psutil.process_iter(["pid", "name"]):
         try:
             for c in proc.net_connections(kind="inet"):
-                c = c._replace(pid=proc.pid) if c.pid is None else c
-                conns.append(c)
+                if c.raddr:
+                    out.append((c.raddr.ip, proc.pid, proc.info.get("name")))
         except (psutil.Error, OSError):
             continue
-    return conns
+    return out
 
 
 class C2ConnectionsDetector(Detector):
@@ -42,20 +49,15 @@ class C2ConnectionsDetector(Detector):
             return []
 
         alerts: list[Alert] = []
-        for conn in _connections():
-            raddr = getattr(conn, "raddr", None)
-            if not raddr:
-                continue
-            ip = raddr.ip if hasattr(raddr, "ip") else (raddr[0] if raddr else None)
+        for ip, pid, pname in _remote_endpoints():
             if not ip or ip not in ioc_ips:
                 continue
-
-            pname, pid = "?", getattr(conn, "pid", None)
-            if pid:
+            if not pname and pid:
                 try:
                     pname = psutil.Process(pid).name()
                 except (psutil.Error, OSError):
                     pname = "?"
+            pname = pname or "?"
 
             alerts.append(
                 Alert(
