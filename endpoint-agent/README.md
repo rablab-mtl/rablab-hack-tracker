@@ -16,7 +16,7 @@ iwr -useb https://raw.githubusercontent.com/rablab-mtl/rablab-hack-tracker/main/
 ```
 
 L'installeur :
-1. Verifie Python 3.11+ (sinon indique comment l'installer).
+1. Verifie Python 3.9+ (deja present sur la plupart des Mac via les Command Line Tools).
 2. Clone le repo dans `~/Library/Application Support/rablab-hack-tracker` (Mac) ou `%LOCALAPPDATA%\rablab-hack-tracker` (Windows).
 3. Cree un venv et installe `psutil` + `requests`.
 4. Pose UNE question : ton email Rablab.

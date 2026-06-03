@@ -12,20 +12,20 @@ $BinDir     = Join-Path $env:LOCALAPPDATA "Microsoft\WindowsApps"
 
 Write-Host "=== rablab-hack-tracker : installation (Windows) ==="
 
-# 1. Trouver Python 3.11+
+# 1. Trouver Python 3.9+
 $PyCmd = $null
-foreach ($c in @("py -3.13","py -3.12","py -3.11","python")) {
+foreach ($c in @("py -3.13","py -3.12","py -3.11","py -3.10","py -3.9","python","python3")) {
   try {
     $parts = $c.Split(" ")
     $ver = & $parts[0] $parts[1..($parts.Length-1)] -c "import sys;print('%d.%d'%sys.version_info[:2])" 2>$null
     if ($ver) {
       $maj,$min = $ver.Split(".")
-      if ([int]$maj -eq 3 -and [int]$min -ge 11) { $PyCmd = $c; break }
+      if ([int]$maj -eq 3 -and [int]$min -ge 9) { $PyCmd = $c; break }
     }
   } catch { }
 }
 if (-not $PyCmd) {
-  Write-Host "Python 3.11+ requis. Installe-le puis relance :"
+  Write-Host "Python 3.9+ requis. Installe-le puis relance :"
   Write-Host "  winget install Python.Python.3.11"
   exit 1
 }

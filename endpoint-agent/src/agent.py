@@ -65,24 +65,32 @@ def _setup_logging() -> logging.Logger:
     return logger
 
 
-def refresh_config(db: Database, sid: str, logger: logging.Logger) -> dict:
+def refresh_config(db: Database, sid: str, logger: logging.Logger, attempts: int = 3) -> dict:
     """Fetch /agent-config from the worker, cache it, sync whitelist. Returns runtime dict.
-    Falls back to the cached runtime.json if the worker is unreachable."""
+    Retries a few times so a transient network blip does not lose the webhook, and falls
+    back to the cached runtime.json only if every attempt fails."""
+    import time as _time
+
     import requests
 
     url = f"{config.worker_url()}/agent-config?device_id={sid}"
-    try:
-        r = requests.get(url, headers={"X-Agent-Token": config.AGENT_SHARED_TOKEN}, timeout=15)
-        if r.ok:
-            remote = r.json()
-            runtime = config.load_runtime_config()
-            runtime.update(remote)
-            config.save_runtime_config(runtime)
-            # Sync server-side whitelist into local DB (permanent silencing).
-            db.sync_whitelist(remote.get("whitelisted_patterns", []) or [])
-            return runtime
-    except (requests.RequestException, ValueError) as e:
-        logger.info(f"config refresh failed, using cached runtime: {e}")
+    for i in range(max(1, attempts)):
+        try:
+            r = requests.get(url, headers={"X-Agent-Token": config.AGENT_SHARED_TOKEN}, timeout=15)
+            if r.ok:
+                remote = r.json()
+                runtime = config.load_runtime_config()
+                runtime.update(remote)
+                config.save_runtime_config(runtime)
+                # Sync server-side whitelist into local DB (permanent silencing).
+                db.sync_whitelist(remote.get("whitelisted_patterns", []) or [])
+                return runtime
+            logger.info(f"config refresh HTTP {r.status_code} (attempt {i + 1})")
+        except (requests.RequestException, ValueError) as e:
+            logger.info(f"config refresh failed (attempt {i + 1}): {e}")
+        if i < attempts - 1:
+            _time.sleep(3)
+    logger.info("config refresh: all attempts failed, using cached runtime")
     return config.load_runtime_config()
 
 

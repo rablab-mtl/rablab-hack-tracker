@@ -13,19 +13,19 @@ WORKER_URL="https://rablab-gads-monitor.rablab.workers.dev"
 
 echo "=== rablab-hack-tracker : installation (macOS) ==="
 
-# 1. Trouver un Python 3.11+
+# 1. Trouver un Python 3.9+ (macOS en fournit un via les Command Line Tools)
 PYBIN=""
-for cand in python3.13 python3.12 python3.11 python3; do
+for cand in python3.13 python3.12 python3.11 python3.10 python3.9 python3; do
   if command -v "$cand" >/dev/null 2>&1; then
     ver=$("$cand" -c 'import sys;print("%d.%d"%sys.version_info[:2])' 2>/dev/null || echo "0.0")
     major=${ver%%.*}; minor=${ver##*.}
-    if [ "$major" -eq 3 ] && [ "$minor" -ge 11 ]; then PYBIN="$cand"; break; fi
+    if [ "$major" -eq 3 ] && [ "$minor" -ge 9 ]; then PYBIN="$cand"; break; fi
   fi
 done
 if [ -z "$PYBIN" ]; then
-  echo "Python 3.11+ requis. Installe-le puis relance :"
-  echo "  - avec Homebrew : brew install python@3.11"
-  echo "  - ou via https://www.python.org/downloads/macos/"
+  echo "Python 3.9+ requis (normalement deja present sur macOS)."
+  echo "Si besoin, installe les outils Apple (gratuit) : xcode-select --install"
+  echo "  ou via Homebrew : brew install python@3.11"
   exit 1
 fi
 echo "Python : $($PYBIN --version)"
