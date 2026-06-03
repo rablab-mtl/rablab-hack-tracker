@@ -54,12 +54,21 @@ class Notifier:
             head = f"{self.device_noun} de {self.device_label}"
         return f"{head} ({self.email})"
 
-    def _whitelist_url(self, dedup_key: str, label: str) -> str | None:
-        """Ask the worker for a signed whitelist link. Best effort."""
+    def _register_alert(self, alert: Alert, label: str) -> str | None:
+        """Register the alert with the worker (for the whitelist link AND the device
+        <-> operation correlation timeline) and return a signed whitelist link. Best effort."""
         try:
             r = requests.post(
                 f"{self.worker_url}/endpoint-alert",
-                json={"device_id": self.short_id, "pattern": dedup_key, "label": label},
+                json={
+                    "device_id": self.short_id,
+                    "pattern": alert.dedup_key,
+                    "label": label,
+                    "device_label": self.device_label,
+                    "email": self.email,
+                    "detector": alert.detector,
+                    "headline": alert.headline,
+                },
                 headers={"X-Agent-Token": self.agent_token},
                 timeout=15,
             )
@@ -91,7 +100,7 @@ class Notifier:
 
     def send_alert(self, alert: Alert) -> bool:
         label = f"{alert.alert_type} sur {self.device_noun} de {self.device_label} : {alert.headline}"
-        wl = self._whitelist_url(alert.dedup_key, label)
+        wl = self._register_alert(alert, label)
         return self._post(self.build_alert_text(alert, wl))
 
     # ----- lifecycle messages ------------------------------------------

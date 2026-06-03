@@ -71,26 +71,35 @@ async function searchStream(
   return rows;
 }
 
+export interface ChildAccount {
+  id: string;
+  name: string;
+  timeZone: string; // IANA tz, e.g. "America/Toronto"; change_event literals use this
+}
+
 // Lists every child account under the MCC (one level; nested managers are followed).
-export async function listChildAccounts(creds: GadsCreds, accessToken: string): Promise<
-  { id: string; name: string }[]
-> {
+export async function listChildAccounts(creds: GadsCreds, accessToken: string): Promise<ChildAccount[]> {
   const gaql = `
     SELECT
       customer_client.id,
       customer_client.descriptive_name,
+      customer_client.time_zone,
       customer_client.manager,
       customer_client.status
     FROM customer_client
     WHERE customer_client.status = 'ENABLED'`;
   const rows = await searchStream(creds, accessToken, creds.loginCustomerId, gaql);
-  const out: { id: string; name: string }[] = [];
+  const out: ChildAccount[] = [];
   for (const r of rows) {
     const cc = r.customerClient;
     if (!cc) continue;
     // Skip pure manager nodes; we want accounts where ads actually run.
     if (cc.manager === true) continue;
-    out.push({ id: String(cc.id), name: cc.descriptiveName ?? "" });
+    out.push({
+      id: String(cc.id),
+      name: cc.descriptiveName ?? "",
+      timeZone: cc.timeZone ?? "UTC",
+    });
   }
   return out;
 }
@@ -99,12 +108,36 @@ export async function listChildAccounts(creds: GadsCreds, accessToken: string): 
 // explicit datetime lower bound. We compute one from the current request time and
 // rely on KV dedup so the exact boundary never causes a double alert.
 // (Date is available in the worker runtime, unlike in workflow scripts.)
-export function buildChangeEventQuery(now: Date, windowMinutes: number): string {
-  const from = new Date(now.getTime() - windowMinutes * 60 * 1000);
-  const fmt = (d: Date) => {
+// Format a Date as "YYYY-MM-DD HH:MM:SS" in a given IANA timezone (h23, no AM/PM).
+function fmtInTz(d: Date, timeZone: string): string {
+  try {
+    const parts = new Intl.DateTimeFormat("en-CA", {
+      timeZone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hourCycle: "h23",
+    }).formatToParts(d);
+    const g = (t: string) => parts.find((p) => p.type === t)?.value ?? "00";
+    return `${g("year")}-${g("month")}-${g("day")} ${g("hour")}:${g("minute")}:${g("second")}`;
+  } catch {
+    // Invalid tz -> fall back to UTC formatting.
     const p = (n: number) => String(n).padStart(2, "0");
     return `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())} ${p(d.getUTCHours())}:${p(d.getUTCMinutes())}:${p(d.getUTCSeconds())}`;
-  };
+  }
+}
+
+export function buildChangeEventQuery(now: Date, lookbackMinutes: number, timeZone: string): string {
+  // change_event needs a BOUNDED range (lower AND upper), else CHANGE_DATE_RANGE_INFINITE.
+  // The datetime literal is interpreted in the account's own timezone, so we format both
+  // bounds in that tz. Small forward buffer covers clock skew. KV dedup prevents repeats.
+  const from = new Date(now.getTime() - lookbackMinutes * 60 * 1000);
+  const to = new Date(now.getTime() + 5 * 60 * 1000);
+  const fromLit = fmtInTz(from, timeZone);
+  const toLit = fmtInTz(to, timeZone);
   return `
     SELECT
       change_event.resource_name,
@@ -120,7 +153,8 @@ export function buildChangeEventQuery(now: Date, windowMinutes: number): string 
       change_event.new_resource,
       customer.descriptive_name
     FROM change_event
-    WHERE change_event.change_date_time >= '${fmt(from)}'
+    WHERE change_event.change_date_time >= '${fromLit}'
+      AND change_event.change_date_time <= '${toLit}'
     ORDER BY change_event.change_date_time DESC
     LIMIT 500`;
 }
@@ -131,8 +165,9 @@ export async function fetchRecentChangeEvents(
   customerId: string,
   now: Date,
   windowMinutes: number,
+  timeZone: string,
 ): Promise<any[]> {
-  const gaql = buildChangeEventQuery(now, windowMinutes);
+  const gaql = buildChangeEventQuery(now, windowMinutes, timeZone);
   return searchStream(creds, accessToken, customerId, gaql);
 }
 

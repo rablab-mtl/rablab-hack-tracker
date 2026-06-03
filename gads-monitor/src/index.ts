@@ -27,6 +27,8 @@ import {
   getWhitelistPayload,
   getDeviceWhitelist,
   addDeviceWhitelistPattern,
+  recordEndpointAlert,
+  getRecentEndpointAlerts,
   type AgentConfig,
   type HeartbeatRecord,
 } from "./storage";
@@ -37,6 +39,7 @@ import {
   listChildAccounts,
   fetchRecentChangeEvents,
   type GadsCreds,
+  type ChildAccount,
 } from "./gads_client";
 
 export interface Env {
@@ -62,6 +65,7 @@ export interface Env {
   GADS_API_VERSION: string;
   GADS_BUDGET_WARN_DAILY?: string; // daily budget ($) at/above which a new campaign alerts ⚠️
   GADS_BUDGET_CRIT_DAILY?: string; // daily budget ($) at/above which it is forced 🚨
+  GADS_SCAN_BATCH?: string; // accounts scanned per cron tick (subrequest budget)
 }
 
 // ----- small helpers -------------------------------------------------------
@@ -184,7 +188,15 @@ async function handleFetch(req: Request, env: Env): Promise<Response> {
       return new Response("forbidden", { status: 403 });
     }
     try {
-      const body = (await req.json()) as { device_id: string; pattern: string; label: string };
+      const body = (await req.json()) as {
+        device_id: string;
+        pattern: string;
+        label: string;
+        device_label?: string;
+        email?: string;
+        detector?: string;
+        headline?: string;
+      };
       const eventId = await hmacHex(env.WHITELIST_SIGNING_KEY, `${body.device_id}:${body.pattern}`);
       const wlToken = await hmacHex(env.WHITELIST_SIGNING_KEY, eventId);
       await storeWhitelistPayload(env.TRACKER_KV, eventId, {
@@ -193,6 +205,17 @@ async function handleFetch(req: Request, env: Env): Promise<Response> {
         device_id: body.device_id,
         pattern: body.pattern,
       });
+      // Record on the timeline so Google Ads alerts can be correlated with this device.
+      if (body.detector) {
+        await recordEndpointAlert(env.TRACKER_KV, {
+          device_id: body.device_id,
+          device_label: body.device_label,
+          email: body.email,
+          detector: body.detector,
+          headline: body.headline ?? "",
+          ts: Date.now(),
+        });
+      }
       const whitelistUrl = `${workerOrigin(req)}/whitelist/${encodeURIComponent(eventId)}?token=${wlToken}`;
       return Response.json({ whitelist_url: whitelistUrl });
     } catch {
@@ -365,11 +388,13 @@ async function getChildAccounts(
   env: Env,
   creds: GadsCreds,
   accessToken: string,
-): Promise<{ id: string; name: string }[]> {
+): Promise<ChildAccount[]> {
   const cached = await env.TRACKER_KV.get("gads:accounts");
   if (cached) {
     try {
-      return JSON.parse(cached) as { id: string; name: string }[];
+      const parsed = JSON.parse(cached) as ChildAccount[];
+      // Ignore stale cache shape from before timezones were stored.
+      if (parsed.every((a) => a.timeZone)) return parsed;
     } catch {
       // fall through and refresh
     }
@@ -396,6 +421,22 @@ async function runGadsScan(env: Env, now: Date): Promise<void> {
 
   const accessToken = await getAccessToken(creds);
   const accounts = await getChildAccounts(env, creds, accessToken);
+  let totalEvents = 0;
+  let alertsSent = 0;
+
+  // Cloudflare caps subrequests per invocation (50 on the Free plan). With many child
+  // accounts (one searchStream each), we rotate through them in batches across cron ticks
+  // using a KV cursor. Dedup means nothing is missed; the whole MCC is swept every few ticks.
+  // On the Workers Paid plan (1000 subrequests) you can raise GADS_SCAN_BATCH to cover all
+  // accounts every tick.
+  const batchSize = Number(env.GADS_SCAN_BATCH || "30");
+  let cursor = Number((await env.TRACKER_KV.get("gads:cursor")) || "0");
+  if (cursor >= accounts.length) cursor = 0;
+  const batch = accounts.slice(cursor, cursor + batchSize);
+  await env.TRACKER_KV.put(
+    "gads:cursor",
+    String(accounts.length ? (cursor + batchSize) % accounts.length : 0),
+  );
   const compromised = csv(env.COMPROMISED_ACCOUNTS);
   const expectedUsers = csv(env.GADS_EXPECTED_USERS);
   const origin = "https://rablab-gads-monitor.rablab.workers.dev";
@@ -404,16 +445,18 @@ async function runGadsScan(env: Env, now: Date): Promise<void> {
     critMicros: Number(env.GADS_BUDGET_CRIT_DAILY || "1000") * 1_000_000,
   };
 
-  for (const acct of accounts) {
+  for (const acct of batch) {
     let rows: any[];
     try {
-      // 10 min window overlaps the 3 min cron; KV dedup prevents double alerts.
-      rows = await fetchRecentChangeEvents(creds, accessToken, acct.id, now, 10);
+      // 15 min lookback in the account's own timezone (overlaps the 3 min cron);
+      // KV dedup on resource_name guarantees each event alerts at most once.
+      rows = await fetchRecentChangeEvents(creds, accessToken, acct.id, now, 15, acct.timeZone);
     } catch (e) {
       console.log(`change_event fetch failed for ${acct.id}: ${e}`);
       continue;
     }
 
+    totalEvents += rows.length;
     for (const row of rows) {
       const ev = (row.changeEvent ?? {}) as ChangeEvent;
       const resourceName: string =
@@ -451,6 +494,20 @@ async function runGadsScan(env: Env, now: Date): Promise<void> {
         extraDetails.unshift(`USER INCONNU : ${userEmail} n'est pas dans la liste des operateurs Google Ads attendus.`);
       }
 
+      // Device <-> operation correlation: which endpoint agents flagged infostealer
+      // behaviour in the 20 min around this Ads operation? Those devices are the prime
+      // suspects for the machine that leaked the credentials used here.
+      const recentEndpoint = await getRecentEndpointAlerts(env.TRACKER_KV, now.getTime() - 20 * 60 * 1000);
+      if (recentEndpoint.length) {
+        extraDetails.push(
+          "Correlation device (alertes infostealer dans les ~20 min, suspects prioritaires) :",
+        );
+        for (const r of recentEndpoint.slice(0, 5)) {
+          const hhmm = new Date(r.ts).toISOString().slice(11, 19);
+          extraDetails.push(`  - ${r.device_label || r.device_id} (${r.email || "?"}) : ${r.detector} a ${hhmm} UTC`);
+        }
+      }
+
       // Per-event whitelist link (HMAC token, payload stored in KV).
       const eventId = await hmacHex(env.WHITELIST_SIGNING_KEY, resourceName + ":id");
       const wlToken = await hmacHex(env.WHITELIST_SIGNING_KEY, eventId);
@@ -474,8 +531,13 @@ async function runGadsScan(env: Env, now: Date): Promise<void> {
         whitelistUrl,
       });
       await postSlack(cfg.webhook_url, text);
+      alertsSent++;
     }
   }
+  console.log(
+    `gads scan ok: batch ${batch.length}/${accounts.length} comptes (cursor ${cursor}), ` +
+      `${totalEvents} change events, ${alertsSent} alertes`,
+  );
 }
 
 export default {

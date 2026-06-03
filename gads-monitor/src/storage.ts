@@ -177,3 +177,48 @@ export async function addDeviceWhitelistPattern(
     await kv.put("dwl:" + deviceId, JSON.stringify(list), { expirationTtl: 30 * 24 * 3600 });
   }
 }
+
+// Endpoint alert timeline: every endpoint alert is recorded here so a Google Ads
+// alert can be cross-referenced with devices that showed infostealer behaviour around
+// the same time (device <-> operation correlation).
+export interface EndpointAlertRecord {
+  device_id: string;
+  device_label?: string;
+  email?: string;
+  detector: string;
+  headline: string;
+  ts: number; // epoch ms, stamped by the worker when received
+}
+
+export async function recordEndpointAlert(
+  kv: KVNamespace,
+  rec: EndpointAlertRecord,
+): Promise<void> {
+  // Key sorts by time; kept 24h (the correlation window only ever looks back minutes).
+  await kv.put(`ea:${rec.ts}:${rec.device_id}`, JSON.stringify(rec), {
+    expirationTtl: 24 * 3600,
+  });
+}
+
+export async function getRecentEndpointAlerts(
+  kv: KVNamespace,
+  sinceMs: number,
+): Promise<EndpointAlertRecord[]> {
+  const out: EndpointAlertRecord[] = [];
+  let cursor: string | undefined;
+  do {
+    const page = await kv.list({ prefix: "ea:", cursor });
+    for (const k of page.keys) {
+      const raw = await kv.get(k.name);
+      if (!raw) continue;
+      try {
+        const rec = JSON.parse(raw) as EndpointAlertRecord;
+        if (rec.ts >= sinceMs) out.push(rec);
+      } catch {
+        // skip malformed
+      }
+    }
+    cursor = page.list_complete ? undefined : page.cursor;
+  } while (cursor);
+  return out.sort((a, b) => b.ts - a.ts);
+}
