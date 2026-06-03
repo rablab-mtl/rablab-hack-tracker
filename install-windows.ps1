@@ -50,14 +50,21 @@ try {
   Write-Host "Python : $PyExe"
 
   # 2. Telecharger le code en ZIP (PAS besoin de git, souvent absent sur Windows).
+  #    On stoppe d'abord un agent qui tournerait (sinon il verrouille des fichiers du venv),
+  #    et on COPIE le code par-dessus sans detruire le .venv existant (un .pyd verrouille
+  #    par l'antivirus faisait echouer la suppression complete du dossier).
   Write-Host "Telechargement du code..."
+  Get-CimInstance Win32_Process -Filter "Name='pythonw.exe' OR Name='python.exe'" -ErrorAction SilentlyContinue |
+    Where-Object { $_.CommandLine -like "*rablab-hack-tracker*agent.py*" } |
+    ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
   $zip = Join-Path $env:TEMP "rablab-hack-tracker-main.zip"
   Invoke-WebRequest -UseBasicParsing -Uri $ZipUrl -OutFile $zip
-  if (Test-Path $InstallDir) { Remove-Item -Recurse -Force $InstallDir }
   $extract = Join-Path $env:TEMP "rht-extract"
   if (Test-Path $extract) { Remove-Item -Recurse -Force $extract }
   Expand-Archive -Path $zip -DestinationPath $extract -Force
-  Move-Item (Join-Path $extract "rablab-hack-tracker-main") $InstallDir
+  $src = Join-Path $extract "rablab-hack-tracker-main"
+  New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
+  Copy-Item -Path (Join-Path $src "*") -Destination $InstallDir -Recurse -Force
   Remove-Item -Recurse -Force $extract -ErrorAction SilentlyContinue
   Remove-Item -Force $zip -ErrorAction SilentlyContinue
 
