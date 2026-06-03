@@ -1,6 +1,6 @@
 """Builds and sends Slack messages for the endpoint agent.
 
-The webhook URL is read from runtime config (fetched from the worker, rotatable by Julien).
+The webhook URL is read from runtime config (fetched from the worker, rotatable by the admin).
 Whitelist links are minted by the worker (only it can sign them); if the worker is
 unreachable, the alert is still sent, just without the link.
 """
@@ -46,7 +46,13 @@ class Notifier:
             return False
 
     def _header(self) -> str:
-        return f"{self.device_noun} de {self.device_label} ({self.email})"
+        # Avoid "Mac de MacBook..." when the computer name already names the machine type.
+        label_low = self.device_label.lower()
+        if self.device_noun.lower() in label_low or "macbook" in label_low or "imac" in label_low:
+            head = self.device_label
+        else:
+            head = f"{self.device_noun} de {self.device_label}"
+        return f"{head} ({self.email})"
 
     def _whitelist_url(self, dedup_key: str, label: str) -> str | None:
         """Ask the worker for a signed whitelist link. Best effort."""

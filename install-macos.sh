@@ -47,7 +47,7 @@ fi
 
 # 4. UNE seule question : email Rablab
 echo ""
-read -r -p "Quel est ton email Rablab ? (ex : nick@rablab.ca) > " EMAIL </dev/tty
+read -r -p "Quel est ton email Rablab ? (ex : prenom.n@rablab.ca) > " EMAIL </dev/tty
 if [ -z "$EMAIL" ]; then echo "Email vide, annulation."; exit 1; fi
 
 # 5. Disclaimer Loi 25

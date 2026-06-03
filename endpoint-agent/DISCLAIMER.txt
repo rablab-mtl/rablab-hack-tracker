@@ -39,7 +39,7 @@ Voici tout ce que cet outil NE FAIT PAS (jamais, verifie le code source) :
 
 Quand un comportement suspect est detecte, une alerte (et UNIQUEMENT
 cette alerte, jamais le contenu de tes donnees) est envoyee dans un canal
-Slack prive entre Julien Capuano et la direction Rablab. Personne d'autre
+Slack prive entre l'equipe securite et la direction Rablab. Personne d'autre
 dans l'equipe n'a acces a ces alertes.
 
 Le code source est public et verifiable :

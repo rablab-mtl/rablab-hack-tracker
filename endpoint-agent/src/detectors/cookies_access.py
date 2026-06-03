@@ -11,7 +11,7 @@ WHY = (
 )
 ACTION = (
     "Debranche ce poste du reseau IMMEDIATEMENT (couper le wifi), puis lance un scan "
-    "(Malwarebytes / Defender). Previens Julien."
+    "(Malwarebytes / Defender). Previens l'equipe securite."
 )
 
 

@@ -45,7 +45,7 @@ $pp = $PyCmd.Split(" ")
 & $VenvPy -m pip install -q -r (Join-Path $AgentDir "requirements.txt")
 
 # 4. UNE seule question : email Rablab
-$Email = Read-Host "Quel est ton email Rablab ? (ex : nick@rablab.ca)"
+$Email = Read-Host "Quel est ton email Rablab ? (ex : prenom.n@rablab.ca)"
 if (-not $Email) { Write-Host "Email vide, annulation."; exit 1 }
 
 # 5. Disclaimer Loi 25

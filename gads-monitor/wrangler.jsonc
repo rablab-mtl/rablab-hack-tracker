@@ -30,6 +30,12 @@
   // Voir gads-monitor/README.md.
   "vars": {
     // Version de l'API Google Ads. A ajuster si Google deprecie cette version.
-    "GADS_API_VERSION": "v18"
+    "GADS_API_VERSION": "v18",
+
+    // Seuils de budget quotidien (en $) pour les nouvelles campagnes.
+    // Le hack cree des campagnes a gros budget (~4500 $/jour) : au-dessus du seuil
+    // critique, l'alerte est forcee en 🚨 peu importe qui a fait l'operation.
+    "GADS_BUDGET_WARN_DAILY": "300",
+    "GADS_BUDGET_CRIT_DAILY": "1000"
   }
 }

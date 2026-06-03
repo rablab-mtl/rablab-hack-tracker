@@ -42,7 +42,7 @@ pas devenir lui-meme un risque :
 - **Le kill switch ne fait que desinstaller**, il n'execute aucun code.
 - **Aucun secret dans le repo.** Le webhook Slack est servi par le worker au runtime. Le seul
   token present dans le code public est un simple filtre anti-bot, sans valeur critique.
-- **Les comptes Google Ads compromis** (`plateformes@rablab.ca`, `ppc.rablab@gmail.com`)
+- **Les comptes vises par l'incident** (configures cote worker, hors du repo public)
   declenchent toujours une alerte 🚨, jamais une alerte douce.
 - **Vie privee.** L'agent regarde QUEL programme ouvre les fichiers d'identifiants, pas leur
   contenu. Il ne lit pas l'historique, les URLs, les fichiers personnels, l'ecran, la camera ou

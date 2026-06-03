@@ -60,6 +60,8 @@ export interface Env {
   COMPROMISED_ACCOUNTS: string;
   GADS_EXPECTED_USERS: string;
   GADS_API_VERSION: string;
+  GADS_BUDGET_WARN_DAILY?: string; // daily budget ($) at/above which a new campaign alerts ⚠️
+  GADS_BUDGET_CRIT_DAILY?: string; // daily budget ($) at/above which it is forced 🚨
 }
 
 // ----- small helpers -------------------------------------------------------
@@ -397,6 +399,10 @@ async function runGadsScan(env: Env, now: Date): Promise<void> {
   const compromised = csv(env.COMPROMISED_ACCOUNTS);
   const expectedUsers = csv(env.GADS_EXPECTED_USERS);
   const origin = "https://rablab-gads-monitor.rablab.workers.dev";
+  const evalOpts = {
+    warnMicros: Number(env.GADS_BUDGET_WARN_DAILY || "300") * 1_000_000,
+    critMicros: Number(env.GADS_BUDGET_CRIT_DAILY || "1000") * 1_000_000,
+  };
 
   for (const acct of accounts) {
     let rows: any[];
@@ -414,15 +420,16 @@ async function runGadsScan(env: Env, now: Date): Promise<void> {
         ev.resourceName ??
         `${acct.id}:${ev.changeDateTime}:${ev.changeResourceType}:${ev.resourceChangeOperation}`;
 
-      const detection = evaluate(ev);
+      const detection = evaluate(ev, evalOpts);
       if (!detection.matched) continue;
       if (await alreadyAlerted(env.TRACKER_KV, resourceName)) continue;
 
       const userEmail = (ev.userEmail ?? "inconnu").toLowerCase();
       const accountName = row.customer?.descriptiveName ?? acct.name ?? acct.id;
 
-      // Icon logic with the security fix: compromised ops accounts always 🚨.
-      let icon = "⚠️";
+      // Critical detections (e.g. big-budget campaign) force 🚨 regardless of user.
+      // Compromised / unknown ops accounts also force 🚨.
+      let icon = detection.critical ? "🚨" : "⚠️";
       const extraDetails = [...detection.details];
       if (compromised.includes(userEmail)) {
         icon = "🚨";

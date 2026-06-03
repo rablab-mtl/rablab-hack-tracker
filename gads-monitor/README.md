@@ -31,7 +31,7 @@ npx wrangler kv namespace create TRACKER_KV
 
 # 2. Secrets obligatoires (agents + admin)
 npx wrangler secret put SLACK_WEBHOOK_URL       # webhook initial du canal #rablab-security
-npx wrangler secret put ADMIN_TOKEN             # 32+ chars aleatoires, connu de Julien seul
+npx wrangler secret put ADMIN_TOKEN             # 32+ chars aleatoires, connu de l'admin seul
 npx wrangler secret put AGENT_SHARED_TOKEN      # token partage des agents (aussi dans le repo public)
 npx wrangler secret put WHITELIST_SIGNING_KEY   # cle aleatoire pour signer les liens whitelist
 

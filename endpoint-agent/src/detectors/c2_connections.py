@@ -75,7 +75,7 @@ class C2ConnectionsDetector(Detector):
                         "Une connexion vers un serveur de commande connu signifie que ce poste est "
                         "infecte et exfiltre probablement des donnees (dont les sessions Google Ads)."
                     ),
-                    action="Debranche ce poste du reseau et lance le scan antivirus. Previens Julien.",
+                    action="Debranche ce poste du reseau et lance le scan antivirus. Previens l'equipe securite.",
                     dedup_key=f"c2:{ip}",
                 )
             )

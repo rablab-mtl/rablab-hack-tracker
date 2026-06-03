@@ -1,7 +1,7 @@
 """Heartbeat handling.
 
 Two channels:
-  - Worker push (every ~10 min): keeps the /status dashboard fresh and lets Julien see
+  - Worker push (every ~10 min): keeps the /status dashboard fresh and lets the admin see
     which devices are alive without spamming Slack.
   - Daily Slack heartbeat at 09:00 America/Toronto: a single reassuring line per device.
 """

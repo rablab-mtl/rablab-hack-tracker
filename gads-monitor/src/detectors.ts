@@ -23,9 +23,16 @@ export interface DetectionResult {
   details: string[];
   why: string;
   actions: string[];
+  critical?: boolean; // true => force 🚨 regardless of who did it (e.g. very large budget)
 }
 
-const BUDGET_ALERT_MICROS = 100_000_000; // 100 $/day in micros
+// Daily-budget thresholds in micros (1 $ = 1_000_000 micros), passed in from env.
+// The signature of this incident is scripts that auto-create campaigns with huge
+// daily budgets (~4500 $/day), so a high "critical" tier is the real smoking gun.
+export interface EvalOptions {
+  warnMicros: number; // at/above this on a new campaign -> alert ⚠️
+  critMicros: number; // at/above this -> force 🚨 (auto-created big-budget campaign)
+}
 
 function micros(resource: any): number | null {
   // campaign_budget.amount_micros lives under different shapes depending on the
@@ -40,7 +47,7 @@ function micros(resource: any): number | null {
 }
 
 // Returns a DetectionResult if the event matches any sensitive rule, else matched:false.
-export function evaluate(ev: ChangeEvent): DetectionResult {
+export function evaluate(ev: ChangeEvent, opts: EvalOptions): DetectionResult {
   const type = (ev.changeResourceType ?? "").toUpperCase();
   const op = (ev.resourceChangeOperation ?? "").toUpperCase();
   const client = (ev.clientType ?? "").toUpperCase();
@@ -103,24 +110,37 @@ export function evaluate(ev: ChangeEvent): DetectionResult {
     };
   }
 
-  // 4. New campaign with a daily budget above 100 $/day.
-  if (type === "CAMPAIGN" && op === "CREATE") {
+  // 4. New campaign budget with a notable daily amount. This is THE incident signature:
+  //    a script creates a campaign whose budget is huge (~4500 $/day). The dollar amount
+  //    lives on the CAMPAIGN_BUDGET resource (a CAMPAIGN only references its budget), so
+  //    we key the budget check here, not on CAMPAIGN CREATE.
+  if (type === "CAMPAIGN_BUDGET" && op === "CREATE") {
     const m = micros(ev.newResource);
-    if (m != null && m > BUDGET_ALERT_MICROS) {
+    if (m != null && m >= opts.warnMicros) {
+      const daily = (m / 1_000_000).toFixed(0);
+      const isCrit = m >= opts.critMicros;
       return {
         matched: true,
+        critical: isCrit,
         rule: "campaign_big_budget",
-        headline: `Nouvelle campagne avec budget eleve (${(m / 1_000_000).toFixed(2)} $/jour)`,
+        headline: isCrit
+          ? `Nouveau budget de campagne GROS : ${daily} $/jour`
+          : `Nouveau budget de campagne : ${daily} $/jour`,
         details: [
-          `Type d'operation : CAMPAIGN CREATE`,
-          `Budget : ${(m / 1_000_000).toFixed(2)} $/jour`,
+          `Type d'operation : CAMPAIGN_BUDGET CREATE`,
+          `Budget quotidien : ${daily} $/jour`,
+          isCrit
+            ? `Au-dessus du seuil critique (${(opts.critMicros / 1_000_000).toFixed(0)} $/jour).`
+            : `Au-dessus du seuil d'alerte (${(opts.warnMicros / 1_000_000).toFixed(0)} $/jour).`,
         ],
         why:
-          "Une nouvelle campagne a gros budget est le payload typique d'un compte compromis : " +
-          "l'attaquant brule le budget vers ses propres destinations.",
+          "Le hack en cours cree des campagnes en automatique avec de gros budgets quotidiens " +
+          "pour bruler la depense vers les destinations de l'attaquant. Une nouvelle campagne a " +
+          "gros budget non planifiee est le signal n1 a verifier.",
         actions: [
-          "Mettre la campagne en pause immediatement si non reconnue",
-          "Confirmer avec la personne qui l'aurait creee",
+          "Mettre la campagne en PAUSE immediatement si elle n'est pas reconnue",
+          "Confirmer qui l'a creee et a partir de quel outil (voir le client_type)",
+          "Si non reconnue : revoquer l'acces du compte ayant servi et reset son mot de passe",
         ],
       };
     }
@@ -132,10 +152,12 @@ export function evaluate(ev: ChangeEvent): DetectionResult {
     const newM = micros(ev.newResource);
     if (oldM != null && newM != null && oldM > 0 && newM > oldM * 1.5) {
       const pct = (((newM - oldM) / oldM) * 100).toFixed(0);
+      const isCrit = newM >= opts.critMicros;
       return {
         matched: true,
+        critical: isCrit,
         rule: "budget_increase",
-        headline: `Augmentation de budget de +${pct}%`,
+        headline: `Augmentation de budget de +${pct}% (vers ${(newM / 1_000_000).toFixed(0)} $/jour)`,
         details: [
           `Ancien budget : ${(oldM / 1_000_000).toFixed(2)} $/jour`,
           `Nouveau budget : ${(newM / 1_000_000).toFixed(2)} $/jour`,

@@ -71,7 +71,7 @@ class TamperDetector(Detector):
                     "Si personne n'a mis a jour l'agent volontairement, une modification de son code "
                     "peut signifier qu'un malware a tente de le neutraliser ou de le detourner."
                 ),
-                action="Confirme avec Julien qu'une mise a jour legitime a eu lieu. Sinon, reinstalle l'agent proprement.",
+                action="Confirme aupres de l'admin qu'une mise a jour legitime a eu lieu. Sinon, reinstalle l'agent proprement.",
                 dedup_key=f"tamper:{current}",
             )
         ]
