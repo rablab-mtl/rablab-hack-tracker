@@ -13,22 +13,45 @@ WORKER_URL="https://rablab-gads-monitor.rablab.workers.dev"
 
 echo "=== rablab-hack-tracker : installation (macOS) ==="
 
-# 1. Trouver un Python 3.9+ (macOS en fournit un via les Command Line Tools)
+# 1. Obtenir Python 3.9+ en UNE etape, sans action utilisateur.
+# On evite d'executer le shim 'python3' nu (il declenche l'installeur Xcode). On ne teste
+# que des interpreteurs versionnes ou installes (brew / python.org). Si rien n'est trouve,
+# on installe automatiquement un Python dedie via uv (pas de sudo, pas de Xcode, pas de Homebrew).
 PYBIN=""
-for cand in python3.13 python3.12 python3.11 python3.10 python3.9 python3; do
+for cand in python3.13 python3.12 python3.11 python3.10 python3.9 \
+            /opt/homebrew/bin/python3 /usr/local/bin/python3; do
   if command -v "$cand" >/dev/null 2>&1; then
     ver=$("$cand" -c 'import sys;print("%d.%d"%sys.version_info[:2])' 2>/dev/null || echo "0.0")
     major=${ver%%.*}; minor=${ver##*.}
-    if [ "$major" -eq 3 ] && [ "$minor" -ge 9 ]; then PYBIN="$cand"; break; fi
+    if [ "$major" = "3" ] && [ "$minor" -ge 9 ] 2>/dev/null; then PYBIN="$cand"; break; fi
   fi
 done
+
+# Si rien trouve mais que les Command Line Tools sont DEJA installes, 'python3' est sur
+# (il ne declenchera pas l'installeur Xcode).
+if [ -z "$PYBIN" ] && xcode-select -p >/dev/null 2>&1 && command -v python3 >/dev/null 2>&1; then
+  ver=$(python3 -c 'import sys;print("%d.%d"%sys.version_info[:2])' 2>/dev/null || echo "0.0")
+  major=${ver%%.*}; minor=${ver##*.}
+  if [ "$major" = "3" ] && [ "$minor" -ge 9 ] 2>/dev/null; then PYBIN="python3"; fi
+fi
+
 if [ -z "$PYBIN" ]; then
-  echo "Python 3.9+ requis (normalement deja present sur macOS)."
-  echo "Si besoin, installe les outils Apple (gratuit) : xcode-select --install"
-  echo "  ou via Homebrew : brew install python@3.11"
+  echo "Aucun Python detecte : installation automatique d'un Python dedie (uv)..."
+  export PATH="$HOME/.local/bin:$PATH"
+  if ! command -v uv >/dev/null 2>&1; then
+    curl -LsSf https://astral.sh/uv/install.sh | sh >/dev/null 2>&1 || {
+      echo "Echec du telechargement de uv. Verifie ta connexion et relance."; exit 1; }
+    export PATH="$HOME/.local/bin:$PATH"
+  fi
+  uv python install 3.12 >/dev/null 2>&1 || true
+  PYBIN="$(uv python find 3.12 2>/dev/null)"
+fi
+
+if [ -z "$PYBIN" ] || ! "$PYBIN" --version >/dev/null 2>&1; then
+  echo "Impossible d'obtenir Python automatiquement. Contacte l'admin."
   exit 1
 fi
-echo "Python : $($PYBIN --version)"
+echo "Python : $("$PYBIN" --version)"
 
 # 2. Cloner ou mettre a jour le repo
 if [ -d "$AGENT_DIR/.git" ] || [ -d "$INSTALL_DIR/.git" ]; then

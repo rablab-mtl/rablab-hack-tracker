@@ -12,24 +12,34 @@ $BinDir     = Join-Path $env:LOCALAPPDATA "Microsoft\WindowsApps"
 
 Write-Host "=== rablab-hack-tracker : installation (Windows) ==="
 
-# 1. Trouver Python 3.9+
-$PyCmd = $null
-foreach ($c in @("py -3.13","py -3.12","py -3.11","py -3.10","py -3.9","python","python3")) {
+# 1. Obtenir Python 3.9+ en UNE etape. uv en secours (sans winget, sans Microsoft Store).
+$PyExe = $null
+foreach ($c in @("py -3.13","py -3.12","py -3.11","py -3.10","py -3.9")) {
   try {
     $parts = $c.Split(" ")
-    $ver = & $parts[0] $parts[1..($parts.Length-1)] -c "import sys;print('%d.%d'%sys.version_info[:2])" 2>$null
-    if ($ver) {
-      $maj,$min = $ver.Split(".")
-      if ([int]$maj -eq 3 -and [int]$min -ge 9) { $PyCmd = $c; break }
+    $exe = & $parts[0] $parts[1..($parts.Length-1)] -c "import sys;print(sys.executable)" 2>$null
+    if ($exe -and (Test-Path $exe)) { $PyExe = $exe; break }
+  } catch { }
+}
+if (-not $PyExe) {
+  # python.exe reel uniquement (pas l'alias Microsoft Store dans WindowsApps)
+  try {
+    $exe = & python -c "import sys;print(sys.executable)" 2>$null
+    if ($exe -and (Test-Path $exe) -and ($exe -notlike "*WindowsApps*")) {
+      $v = & python -c "import sys;print('%d%d'%sys.version_info[:2])" 2>$null
+      if ([int]$v -ge 39) { $PyExe = $exe }
     }
   } catch { }
 }
-if (-not $PyCmd) {
-  Write-Host "Python 3.9+ requis. Installe-le puis relance :"
-  Write-Host "  winget install Python.Python.3.11"
-  exit 1
+if (-not $PyExe) {
+  Write-Host "Aucun Python detecte : installation automatique d'un Python dedie (uv)..."
+  try { irm https://astral.sh/uv/install.ps1 | iex } catch { Write-Host "Echec uv : $_"; exit 1 }
+  $env:Path = "$env:USERPROFILE\.local\bin;$env:Path"
+  uv python install 3.12
+  $PyExe = (uv python find 3.12)
 }
-Write-Host "Python : $PyCmd"
+if (-not $PyExe) { Write-Host "Impossible d'obtenir Python automatiquement."; exit 1 }
+Write-Host "Python : $PyExe"
 
 # 2. Cloner ou mettre a jour
 if (Test-Path (Join-Path $InstallDir ".git")) {
@@ -39,8 +49,7 @@ if (Test-Path (Join-Path $InstallDir ".git")) {
 }
 
 # 3. venv + dependances
-$pp = $PyCmd.Split(" ")
-& $pp[0] $pp[1..($pp.Length-1)] -m venv $Venv
+& $PyExe -m venv $Venv
 & $VenvPy -m pip install -q --upgrade pip
 & $VenvPy -m pip install -q -r (Join-Path $AgentDir "requirements.txt")
 
