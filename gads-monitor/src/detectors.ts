@@ -152,7 +152,10 @@ export function evaluate(ev: ChangeEvent, opts: EvalOptions): DetectionResult {
     const newM = micros(ev.newResource);
     if (oldM != null && newM != null && oldM > 0 && newM > oldM * 1.5) {
       const pct = (((newM - oldM) / oldM) * 100).toFixed(0);
-      const isCrit = newM >= opts.critMicros;
+      // Drastic = more than tripled (relative), OR above the absolute critical backstop.
+      // Relative is the priority signal: a small budget suddenly exploding is suspicious
+      // even if the absolute number is modest.
+      const isCrit = newM > oldM * 3 || newM >= opts.critMicros;
       return {
         matched: true,
         critical: isCrit,

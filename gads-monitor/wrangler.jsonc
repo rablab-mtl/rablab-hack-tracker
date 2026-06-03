@@ -32,10 +32,11 @@
     // Version de l'API Google Ads. A ajuster si Google deprecie cette version.
     "GADS_API_VERSION": "v18",
 
-    // Seuils de budget quotidien (en $) pour les nouvelles campagnes.
-    // Le hack cree des campagnes a gros budget (~4500 $/jour) : au-dessus du seuil
-    // critique, l'alerte est forcee en 🚨 peu importe qui a fait l'operation.
-    "GADS_BUDGET_WARN_DAILY": "300",
-    "GADS_BUDGET_CRIT_DAILY": "1000"
+    // Seuils de budget quotidien (en $) : BACKSTOP seulement. Le montant absolu n'est
+    // qu'indicatif (vous avez plein de comptes avec des budgets varies). Les vrais
+    // signaux 🚨 sont les operations NON HUMAINES (script/API/bulk) et les changements
+    // DRASTIQUES (budget qui plus que triple), geres dans le code. Ajustez si besoin.
+    "GADS_BUDGET_WARN_DAILY": "1000",
+    "GADS_BUDGET_CRIT_DAILY": "5000"
   }
 }
