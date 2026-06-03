@@ -26,14 +26,14 @@ def scan_credential_access(
 
     alerts: list[Alert] = []
     for proc, matched_path in _procutil.processes_holding(paths):
-        try:
-            name = proc.name()
-        except Exception:
-            name = "?"
-        if _procutil.is_whitelisted_proc(name):
+        d = _procutil.proc_details(proc)
+        name = d["name"]
+        # Trust a whitelisted name ONLY if the binary is properly signed. Malware commonly
+        # masquerades under a legit system process name (e.g. mdworker_shared) from a user
+        # directory; that copy is not Apple-signed, so we still alert on it.
+        if _procutil.is_whitelisted_proc(name) and d["signature"] in ("apple", "developer"):
             continue
 
-        d = _procutil.proc_details(proc)
         # dedup_key on the binary hash when we have it, else the exe path.
         dedup_key = f"{detector_name}:{d['sha256'] or d['exe'] or name}"
 
@@ -44,6 +44,10 @@ def scan_credential_access(
             f"Fichier lu : {matched_path}",
             f"Signature : {_sig_label(d['signature'])}",
         ]
+        if _procutil.is_whitelisted_proc(name):
+            details.append(
+                f"ATTENTION : se fait passer pour le processus systeme {name} mais n'est pas signe Apple."
+            )
         if d["sha256"]:
             details.append(f"SHA-256 : {d['sha256']}")
 
