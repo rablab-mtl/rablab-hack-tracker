@@ -118,7 +118,7 @@ function htmlPage(title: string, body: string): Response {
   body{font-family:-apple-system,Roboto,Segoe UI,sans-serif;margin:0;background:#f5f5f5;color:#1a1a1a}
   header{background:#26372b;color:#fff;padding:18px 24px;font-size:20px;font-weight:600}
   main{max-width:900px;margin:24px auto;padding:0 16px}
-  .card{background:#fff;border:1px solid #bfbfbf;border-radius:8px;padding:20px;margin-bottom:18px}
+  .card{background:#fff;border:1px solid #bfbfbf;border-radius:8px;padding:20px;margin-bottom:18px;overflow-x:auto}
   h2{color:#26372b;border-bottom:3px solid #ec662a;padding-bottom:6px}
   label{display:block;margin:14px 0 4px;font-weight:600}
   input[type=text],input[type=url],textarea{width:100%;padding:9px;border:1px solid #bfbfbf;border-radius:6px;font-size:14px;box-sizing:border-box}
@@ -126,11 +126,12 @@ function htmlPage(title: string, body: string): Response {
   button{background:#ec662a;color:#fff;border:0;padding:11px 20px;border-radius:6px;font-size:15px;font-weight:600;cursor:pointer;margin-top:16px}
   button.secondary{background:#26372b}
   table{width:100%;border-collapse:collapse;margin-top:10px}
-  th{background:#26372b;color:#fff;text-align:left;padding:9px}
-  td{padding:9px;border-bottom:1px solid #eee}
+  th{background:#26372b;color:#fff;text-align:left;padding:9px;overflow-wrap:anywhere}
+  td{padding:9px;border-bottom:1px solid #eee;overflow-wrap:anywhere;word-break:break-word}
   tr:nth-child(even) td{background:#f5f5f5}
   .ok{color:#1a7f37}.warn{color:#b35900}.bad{color:#b00020}
-  code{background:#f5f5f5;padding:2px 5px;border-radius:4px}
+  code{background:#f5f5f5;padding:2px 5px;border-radius:4px;overflow-wrap:anywhere;white-space:normal}
+  @media (max-width:600px){ main{padding:0 10px} .card{padding:14px} table{font-size:13px} }
 </style></head><body><header>Rablab Hack Tracker</header><main>${body}</main></body></html>`;
   return new Response(html, { headers: { "Content-Type": "text/html; charset=utf-8" } });
 }
