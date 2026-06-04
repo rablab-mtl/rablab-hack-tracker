@@ -84,6 +84,7 @@ export interface GadsWhitelistEntry {
   customer_id: string;
   user_email: string;
   label?: string;
+  added_at?: number; // epoch ms when whitelisted
 }
 
 export async function getGadsWhitelist(kv: KVNamespace): Promise<GadsWhitelistEntry[]> {
@@ -114,7 +115,7 @@ export async function addGadsWhitelist(
 ): Promise<void> {
   const list = await getGadsWhitelist(kv);
   if (!list.some((e) => gadsKey(e.customer_id, e.user_email) === gadsKey(cid, email))) {
-    list.push({ customer_id: cid, user_email: (email || "").toLowerCase(), label });
+    list.push({ customer_id: cid, user_email: (email || "").toLowerCase(), label, added_at: Date.now() });
     await kv.put(WHITELIST_KEY, JSON.stringify(list));
   }
 }
@@ -185,15 +186,30 @@ export async function getWhitelistPayload(
 }
 
 // Per-device whitelist of endpoint patterns (binary hash, extension id, ip...).
-// An agent fetches this with its config and silences these patterns permanently.
-export async function getDeviceWhitelist(kv: KVNamespace, deviceId: string): Promise<string[]> {
+// Stored as {pattern, added_at} objects (legacy plain strings are normalised on read).
+// An agent fetches just the pattern strings with its config and silences them.
+export interface DeviceWhitelistEntry {
+  pattern: string;
+  added_at?: number;
+}
+
+export async function getDeviceWhitelistEntries(
+  kv: KVNamespace,
+  deviceId: string,
+): Promise<DeviceWhitelistEntry[]> {
   const raw = await kv.get("dwl:" + deviceId);
   if (!raw) return [];
   try {
-    return JSON.parse(raw) as string[];
+    const parsed = JSON.parse(raw) as (string | DeviceWhitelistEntry)[];
+    return parsed.map((e) => (typeof e === "string" ? { pattern: e } : e));
   } catch {
     return [];
   }
+}
+
+// Plain pattern list for the agent (/agent-config). Unchanged contract for the agent.
+export async function getDeviceWhitelist(kv: KVNamespace, deviceId: string): Promise<string[]> {
+  return (await getDeviceWhitelistEntries(kv, deviceId)).map((e) => e.pattern);
 }
 
 export async function addDeviceWhitelistPattern(
@@ -201,9 +217,9 @@ export async function addDeviceWhitelistPattern(
   deviceId: string,
   pattern: string,
 ): Promise<void> {
-  const list = await getDeviceWhitelist(kv, deviceId);
-  if (!list.includes(pattern)) {
-    list.push(pattern);
+  const list = await getDeviceWhitelistEntries(kv, deviceId);
+  if (!list.some((e) => e.pattern === pattern)) {
+    list.push({ pattern, added_at: Date.now() });
     await kv.put("dwl:" + deviceId, JSON.stringify(list), { expirationTtl: 30 * 24 * 3600 });
   }
 }
@@ -213,22 +229,22 @@ export async function removeDeviceWhitelistPattern(
   deviceId: string,
   pattern: string,
 ): Promise<void> {
-  const list = (await getDeviceWhitelist(kv, deviceId)).filter((p) => p !== pattern);
+  const list = (await getDeviceWhitelistEntries(kv, deviceId)).filter((e) => e.pattern !== pattern);
   await kv.put("dwl:" + deviceId, JSON.stringify(list), { expirationTtl: 30 * 24 * 3600 });
 }
 
-// Lists every device's whitelisted patterns (for the admin management page).
+// Lists every device's whitelisted entries (for the admin management page).
 export async function listDeviceWhitelists(
   kv: KVNamespace,
-): Promise<{ device_id: string; patterns: string[] }[]> {
-  const out: { device_id: string; patterns: string[] }[] = [];
+): Promise<{ device_id: string; entries: DeviceWhitelistEntry[] }[]> {
+  const out: { device_id: string; entries: DeviceWhitelistEntry[] }[] = [];
   let cursor: string | undefined;
   do {
     const page = await kv.list({ prefix: "dwl:", cursor });
     for (const k of page.keys) {
       const deviceId = k.name.slice("dwl:".length);
-      const patterns = await getDeviceWhitelist(kv, deviceId);
-      if (patterns.length) out.push({ device_id: deviceId, patterns });
+      const entries = await getDeviceWhitelistEntries(kv, deviceId);
+      if (entries.length) out.push({ device_id: deviceId, entries });
     }
     cursor = page.list_complete ? undefined : page.cursor;
   } while (cursor);

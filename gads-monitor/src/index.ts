@@ -109,10 +109,31 @@ function esc(s: string): string {
     .replace(/"/g, "&quot;");
 }
 
+function fmtDate(ms?: number): string {
+  if (!ms) return "?";
+  return new Date(ms).toISOString().slice(0, 16).replace("T", " ") + " UTC";
+}
+
+// On-brand favicon (orange robot + shield, Rablab cream), served at /favicon.svg.
+const FAVICON_SVG =
+  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">` +
+  `<rect width="64" height="64" rx="12" fill="#FAF0E6"/>` +
+  `<rect x="30" y="5" width="4" height="7" rx="2" fill="#EC662A"/>` +
+  `<circle cx="32" cy="5" r="3.5" fill="#EC662A"/>` +
+  `<rect x="15" y="13" width="34" height="25" rx="8" fill="#EC662A"/>` +
+  `<circle cx="25" cy="25" r="3.2" fill="#FAF0E6"/>` +
+  `<circle cx="39" cy="25" r="3.2" fill="#FAF0E6"/>` +
+  `<path d="M25 31 q7 4 14 0" stroke="#FAF0E6" stroke-width="2.6" fill="none" stroke-linecap="round"/>` +
+  `<path d="M32 40 l13 4 v6 q0 9 -13 13 q-13 -4 -13 -13 v-6 z" fill="#EC662A"/>` +
+  `<circle cx="32" cy="52" r="3.2" fill="#FAF0E6"/>` +
+  `<rect x="30.4" y="52" width="3.2" height="6.5" rx="1.2" fill="#FAF0E6"/>` +
+  `</svg>`;
+
 function htmlPage(title: string, body: string): Response {
   // Rablab colours: vert #26372b, orange #ec662a, gris #f5f5f5.
   const html = `<!doctype html><html lang="fr"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <title>${esc(title)}</title>
 <style>
   body{font-family:-apple-system,Roboto,Segoe UI,sans-serif;margin:0;background:#f5f5f5;color:#1a1a1a}
@@ -162,6 +183,12 @@ async function handleFetch(req: Request, env: Env): Promise<Response> {
   const url = new URL(req.url);
   const path = url.pathname;
   const token = url.searchParams.get("token") ?? "";
+
+  if (path === "/favicon.svg") {
+    return new Response(FAVICON_SVG, {
+      headers: { "Content-Type": "image/svg+xml", "Cache-Control": "max-age=86400" },
+    });
+  }
 
   // GET / : harmless landing page, no secrets.
   if (path === "/" || path === "") {
@@ -299,14 +326,14 @@ async function handleFetch(req: Request, env: Env): Promise<Response> {
       `<button type="submit" style="padding:4px 10px;font-size:12px;margin:0">Retirer</button></form>`;
     const gadsRows = gadsWl.length
       ? gadsWl.map((e) =>
-          `<tr><td>${esc(e.customer_id)}</td><td>${esc(e.user_email)}</td>` +
+          `<tr><td>${esc(e.customer_id)}</td><td>${esc(e.user_email)}</td><td>${fmtDate(e.added_at)}</td>` +
           `<td>${rmForm({ action: "rm_gads", cid: e.customer_id, email: e.user_email })}</td></tr>`).join("")
-      : `<tr><td colspan="3">Aucune entree.</td></tr>`;
+      : `<tr><td colspan="4">Aucune entree.</td></tr>`;
     const endpointRows = deviceWl.length
-      ? deviceWl.flatMap((d) => d.patterns.map((p) =>
-          `<tr><td>${esc(d.device_id)}</td><td><code>${esc(p)}</code></td>` +
-          `<td>${rmForm({ action: "rm_endpoint", device: d.device_id, pattern: p })}</td></tr>`)).join("")
-      : `<tr><td colspan="3">Aucune entree.</td></tr>`;
+      ? deviceWl.flatMap((d) => d.entries.map((en) =>
+          `<tr><td>${esc(d.device_id)}</td><td><code>${esc(en.pattern)}</code></td><td>${fmtDate(en.added_at)}</td>` +
+          `<td>${rmForm({ action: "rm_endpoint", device: d.device_id, pattern: en.pattern })}</td></tr>`)).join("")
+      : `<tr><td colspan="4">Aucune entree.</td></tr>`;
 
     const body = `<div class="card"><h2>Configuration des agents</h2>
     <form method="POST" action="/admin?token=${esc(token)}">
@@ -321,10 +348,10 @@ async function handleFetch(req: Request, env: Env): Promise<Response> {
       <button type="submit">Save</button>
     </form></div>
     <div class="card"><h2>Whitelist Google Ads (compte + utilisateur)</h2>
-      <table><thead><tr><th>Compte client</th><th>Utilisateur</th><th></th></tr></thead>
+      <table><thead><tr><th>Compte client</th><th>Utilisateur</th><th>Ajoute le</th><th></th></tr></thead>
       <tbody>${gadsRows}</tbody></table></div>
     <div class="card"><h2>Whitelist postes (pattern par device)</h2>
-      <table><thead><tr><th>Device</th><th>Pattern</th><th></th></tr></thead>
+      <table><thead><tr><th>Device</th><th>Pattern</th><th>Ajoute le</th><th></th></tr></thead>
       <tbody>${endpointRows}</tbody></table></div>
     <div class="card"><h2>Pages</h2>
       <p><a href="/status?token=${esc(token)}">Dashboard des devices</a></p>
