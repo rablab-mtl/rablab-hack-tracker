@@ -52,10 +52,14 @@ def _binary_suspicious(binary: str) -> tuple[bool, list[str]]:
     low = binary.lower()
     if not any(h in low for h in SUSPICIOUS_DIR_HINTS):
         return (False, [])
-    reasons = [f"Binaire dans un repertoire temporaire/cache : {binary}"]
-    if sys.platform == "darwin" and _procutil.code_signature(binary) in ("unsigned", "unknown"):
-        reasons.append("et pas signe Apple / developer ID connu")
-    return (True, reasons)
+    # A validly signed binary (Apple / Developer ID / Microsoft) in a temp/cache dir is
+    # almost always a legit updater or installer, not infostealer persistence. Skip it.
+    if _procutil.signature_trusted(_procutil.code_signature(binary)):
+        return (False, [])
+    return (True, [
+        f"Binaire dans un repertoire temporaire/cache : {binary}",
+        "et pas signe par un editeur reconnu",
+    ])
 
 
 def _label_suspicious(label: str) -> bool:

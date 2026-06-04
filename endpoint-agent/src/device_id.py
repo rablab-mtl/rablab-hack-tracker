@@ -14,10 +14,13 @@ import sys
 
 
 def _machine_serial() -> str:
+    # Must NEVER crash: a bad reading falls back to the hostname. errors="ignore" because
+    # ioreg can emit non-UTF-8 bytes, and a targeted query keeps the output small and clean.
     try:
         if sys.platform == "darwin":
             out = subprocess.run(
-                ["ioreg", "-l"], capture_output=True, text=True, timeout=10
+                ["ioreg", "-rd1", "-c", "IOPlatformExpertDevice"],
+                capture_output=True, text=True, errors="ignore", timeout=10,
             ).stdout
             for line in out.splitlines():
                 if "IOPlatformSerialNumber" in line:
@@ -26,14 +29,12 @@ def _machine_serial() -> str:
         elif sys.platform == "win32":
             out = subprocess.run(
                 ["wmic", "bios", "get", "serialnumber"],
-                capture_output=True,
-                text=True,
-                timeout=10,
+                capture_output=True, text=True, errors="ignore", timeout=10,
             ).stdout
             lines = [ln.strip() for ln in out.splitlines() if ln.strip()]
             if len(lines) >= 2:
                 return lines[1]
-    except (subprocess.SubprocessError, OSError):
+    except Exception:
         pass
     return platform.node() or "unknown"
 

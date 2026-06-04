@@ -171,7 +171,7 @@ def _compute_signature(exe: str) -> str:
             target = exe.split("/Contents/MacOS/")[0] if "/Contents/MacOS/" in exe else exe
             r = subprocess.run(
                 ["codesign", "-dv", "--verbose=2", target],
-                capture_output=True, text=True, timeout=8,
+                capture_output=True, text=True, errors="ignore", timeout=8,
             )
             info = ((r.stderr or "") + (r.stdout or "")).lower()
             if r.returncode != 0:
@@ -186,7 +186,7 @@ def _compute_signature(exe: str) -> str:
             r = subprocess.run(
                 ["powershell", "-NoProfile", "-NonInteractive", "-Command",
                  f'(Get-AuthenticodeSignature -LiteralPath "{exe}").Status'],
-                capture_output=True, text=True, timeout=20,
+                capture_output=True, text=True, errors="ignore", timeout=20,
             )
             status = (r.stdout or "").strip()
             if status == "Valid":
@@ -194,7 +194,7 @@ def _compute_signature(exe: str) -> str:
             if status == "NotSigned":
                 return "unsigned"
             return "unknown"
-    except (subprocess.SubprocessError, OSError):
+    except Exception:
         return "unknown"
     return "unknown"
 
