@@ -43,5 +43,7 @@ fi
 
 # Retrait du code + venv (le script s'auto-supprime, ok sous Unix une fois lance).
 rm -rf "$INSTALL_DIR"
+# Python dedie telecharge a l'install (si present) : on le retire aussi.
+rm -rf "$HOME/Library/Application Support/rablab-python"
 
 echo "✅ Desinstallation terminee. A plus."

@@ -35,23 +35,37 @@ if [ -z "$PYBIN" ] && xcode-select -p >/dev/null 2>&1 && command -v python3 >/de
   if [ "$major" = "3" ] && [ "$minor" -ge 9 ] 2>/dev/null; then PYBIN="python3"; fi
 fi
 
-# Si aucun Python utilisable, on NE tente PAS d'en installer un en silence : sur macOS,
-# meme uv requiert les outils Apple (install_name_tool), donc ca declenche Xcode et laisse
-# un Python casse si l'install Apple echoue. On guide vers la solution fiable, puis l'utilisateur
-# relance la commande (un Mac qui a deja Python ou les outils Apple n'arrive jamais ici).
+# Aucun Python trouve : on en installe un dedie, automatiquement, SANS Xcode et SANS mot de
+# passe. On telecharge un build "install_only" relocalisable (le meme type que uv utilise,
+# mais sans l'etape install_name_tool qui declenche Xcode). ~25 Mo, curl + tar (integres).
+# Il vit hors du dossier d'install (qui est efface/recree a chaque run).
+if [ -z "$PYBIN" ] || ! "$PYBIN" --version >/dev/null 2>&1; then
+  echo "Aucun Python sur ce Mac : installation auto d'un Python dedie (~25 Mo, sans Xcode, sans mot de passe)..."
+  case "$(uname -m)" in
+    arm64) PBS="aarch64-apple-darwin" ;;
+    *)     PBS="x86_64-apple-darwin" ;;
+  esac
+  PYHOME="$HOME/Library/Application Support/rablab-python"
+  if [ ! -x "$PYHOME/python/bin/python3" ]; then
+    URL=$(curl -fsSL https://api.github.com/repos/astral-sh/python-build-standalone/releases/latest \
+      | grep -o "https://[^\"]*cpython-3\.12[^\"]*${PBS}-install_only\.tar\.gz" | head -1)
+    if [ -n "$URL" ]; then
+      mkdir -p "$PYHOME"
+      curl -fsSL "$URL" -o "$PYHOME/py.tar.gz" \
+        && tar -xzf "$PYHOME/py.tar.gz" -C "$PYHOME" \
+        && rm -f "$PYHOME/py.tar.gz"
+    fi
+  fi
+  [ -x "$PYHOME/python/bin/python3" ] && PYBIN="$PYHOME/python/bin/python3"
+fi
+
 if [ -z "$PYBIN" ] || ! "$PYBIN" --version >/dev/null 2>&1; then
   echo ""
-  echo "Aucun Python utilisable sur ce Mac. Une seule etape, une seule fois :"
-  echo ""
-  echo "  Option 1 (la plus fiable) : installe Python depuis"
-  echo "     https://www.python.org/downloads/macos/"
-  echo "     (bouton Download, ouvre le .pkg, suis les etapes), PUIS relance cette commande."
-  echo ""
-  echo "  Option 2 : installe les outils Apple avec   xcode-select --install"
-  echo "     (clique Installer, attends la fin), PUIS relance cette commande."
-  echo ""
-  echo "  Si une fenetre Apple dit 'non disponible depuis le serveur de mise a jour' :"
-  echo "  c'est un pepin temporaire d'Apple, utilise l'Option 1 (python.org)."
+  echo "L'installation automatique de Python n'a pas pu se faire (connexion ?)."
+  echo "C'est simple a regler, 2 minutes :"
+  echo "  1. Va sur  https://www.python.org/downloads/macos/"
+  echo "  2. Clique le gros bouton 'Download', ouvre le fichier telecharge, suis les etapes."
+  echo "  3. Reviens ici et colle EXACTEMENT la meme commande qu'au depart."
   exit 1
 fi
 echo "Python : $("$PYBIN" --version)"
