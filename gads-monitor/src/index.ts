@@ -20,13 +20,18 @@ import {
   getConfig,
   saveConfig,
   alreadyAlerted,
-  addKnownCustomerId,
+  addGadsWhitelist,
+  removeGadsWhitelist,
+  getGadsWhitelist,
+  isGadsWhitelisted,
   saveHeartbeat,
   listHeartbeats,
   storeWhitelistPayload,
   getWhitelistPayload,
   getDeviceWhitelist,
   addDeviceWhitelistPattern,
+  removeDeviceWhitelistPattern,
+  listDeviceWhitelists,
   recordEndpointAlert,
   getRecentEndpointAlerts,
   type AgentConfig,
@@ -250,6 +255,21 @@ async function handleFetch(req: Request, env: Env): Promise<Response> {
 
     if (req.method === "POST") {
       const form = await req.formData();
+      const action = String(form.get("action") ?? "save");
+
+      if (action === "rm_gads") {
+        await removeGadsWhitelist(env.TRACKER_KV, String(form.get("cid") ?? ""), String(form.get("email") ?? ""));
+        return htmlPage("Whitelist", `<div class="card"><h2>✅ Retire de la whitelist</h2>
+          <p>Ce compte/utilisateur Google Ads re-declenchera des alertes.</p>
+          <p><a href="/admin?token=${esc(token)}">Retour</a></p></div>`);
+      }
+      if (action === "rm_endpoint") {
+        await removeDeviceWhitelistPattern(env.TRACKER_KV, String(form.get("device") ?? ""), String(form.get("pattern") ?? ""));
+        return htmlPage("Whitelist", `<div class="card"><h2>✅ Retire de la whitelist</h2>
+          <p>Ce pattern re-declenchera des alertes sur ce poste (a son prochain refresh, max 1 h).</p>
+          <p><a href="/admin?token=${esc(token)}">Retour</a></p></div>`);
+      }
+
       const next: AgentConfig = {
         ...cfg,
         webhook_url: String(form.get("webhook_url") ?? cfg.webhook_url).trim(),
@@ -269,8 +289,27 @@ async function handleFetch(req: Request, env: Env): Promise<Response> {
       );
     }
 
+    // Whitelist management (view + remove a mistaken whitelist entry).
+    const gadsWl = await getGadsWhitelist(env.TRACKER_KV);
+    const deviceWl = await listDeviceWhitelists(env.TRACKER_KV);
+    const rmForm = (fields: Record<string, string>) =>
+      `<form method="POST" action="/admin?token=${esc(token)}" style="display:inline">` +
+      Object.entries(fields).map(([k, v]) => `<input type="hidden" name="${k}" value="${esc(v)}">`).join("") +
+      `<button type="submit" style="padding:4px 10px;font-size:12px;margin:0">Retirer</button></form>`;
+    const gadsRows = gadsWl.length
+      ? gadsWl.map((e) =>
+          `<tr><td>${esc(e.customer_id)}</td><td>${esc(e.user_email)}</td>` +
+          `<td>${rmForm({ action: "rm_gads", cid: e.customer_id, email: e.user_email })}</td></tr>`).join("")
+      : `<tr><td colspan="3">Aucune entree.</td></tr>`;
+    const endpointRows = deviceWl.length
+      ? deviceWl.flatMap((d) => d.patterns.map((p) =>
+          `<tr><td>${esc(d.device_id)}</td><td><code>${esc(p)}</code></td>` +
+          `<td>${rmForm({ action: "rm_endpoint", device: d.device_id, pattern: p })}</td></tr>`)).join("")
+      : `<tr><td colspan="3">Aucune entree.</td></tr>`;
+
     const body = `<div class="card"><h2>Configuration des agents</h2>
     <form method="POST" action="/admin?token=${esc(token)}">
+      <input type="hidden" name="action" value="save">
       <label>Slack Webhook URL</label>
       <input type="url" name="webhook_url" value="${esc(cfg.webhook_url)}">
       <label><input type="checkbox" name="kill_switch" ${cfg.kill_switch ? "checked" : ""}> Kill switch (force la desinstallation de tous les agents)</label>
@@ -280,6 +319,12 @@ async function handleFetch(req: Request, env: Env): Promise<Response> {
       <textarea name="ioc_feeds">${esc(cfg.ioc_feeds.join("\n"))}</textarea>
       <button type="submit">Save</button>
     </form></div>
+    <div class="card"><h2>Whitelist Google Ads (compte + utilisateur)</h2>
+      <table><thead><tr><th>Compte client</th><th>Utilisateur</th><th></th></tr></thead>
+      <tbody>${gadsRows}</tbody></table></div>
+    <div class="card"><h2>Whitelist postes (pattern par device)</h2>
+      <table><thead><tr><th>Device</th><th>Pattern</th><th></th></tr></thead>
+      <tbody>${endpointRows}</tbody></table></div>
     <div class="card"><h2>Pages</h2>
       <p><a href="/status?token=${esc(token)}">Dashboard des devices</a></p>
     </div>`;
@@ -362,7 +407,7 @@ async function handleFetch(req: Request, env: Env): Promise<Response> {
       );
     }
     if (payload.scope === "gads" && payload.customer_id) {
-      await addKnownCustomerId(env.TRACKER_KV, payload.customer_id);
+      await addGadsWhitelist(env.TRACKER_KV, payload.customer_id, payload.user_email ?? "", payload.label);
     }
     if (payload.scope === "endpoint" && payload.device_id && payload.pattern) {
       // The agent fetches this list with its config and silences the pattern for good.
@@ -478,20 +523,24 @@ async function runGadsScan(env: Env, now: Date): Promise<void> {
       const userEmail = (ev.userEmail ?? "inconnu").toLowerCase();
       const accountName = row.customer?.descriptiveName ?? acct.name ?? acct.id;
 
-      // PRIORITY signal: the operation was generated by a script/API/bulk, not by a
-      // human in the web UI. Legit Rablab ops go through the web client, so a
-      // machine-generated change on the MCC is the strongest indicator of this incident.
+      // Skip if this (account + user) was whitelisted as a known-legit actor.
+      if (await isGadsWhitelisted(env.TRACKER_KV, acct.id, userEmail)) continue;
+
+      // A machine-generated op (API / script / bulk) is noted, but on its own it is only
+      // "a verifier": legitimate automation tools also drive the API. It escalates to 🚨
+      // only combined with a critical detection or a compromised / unknown user (below).
       const clientU = (ev.clientType ?? "").toUpperCase();
       const HUMAN_CLIENTS = ["GOOGLE_ADS_WEB_CLIENT", "GOOGLE_ADS_EDITOR", "GOOGLE_ADS_MOBILE_APP"];
       const nonHuman = clientU !== "" && !HUMAN_CLIENTS.includes(clientU);
 
-      // 🚨 when: machine-generated, OR a drastic/critical detection, OR a compromised/unknown user.
-      let icon = detection.critical || nonHuman ? "🚨" : "⚠️";
+      // 🚨 from a critical detection (drastic / big budget), a compromised account, or an
+      // unknown user. Otherwise ⚠️ to verify.
+      let icon = detection.critical ? "🚨" : "⚠️";
       const extraDetails = [...detection.details];
       if (nonHuman) {
         extraDetails.unshift(
-          `OPERATION NON HUMAINE : generee via ${ev.clientType} (script / API / bulk), pas par ` +
-            `l'interface web. C'est le signal prioritaire de l'incident.`,
+          `Operation generee via ${ev.clientType} (script / API / bulk), pas l'interface web. ` +
+            `A verifier (peut etre un outil d'automatisation legitime).`,
         );
       }
       if (compromised.includes(userEmail)) {
@@ -523,6 +572,7 @@ async function runGadsScan(env: Env, now: Date): Promise<void> {
         scope: "gads",
         label: `Operation ${detection.rule} sur ${accountName} par ${userEmail}`,
         customer_id: acct.id,
+        user_email: userEmail,
       });
       const whitelistUrl = `${origin}/whitelist/${encodeURIComponent(eventId)}?token=${wlToken}`;
 

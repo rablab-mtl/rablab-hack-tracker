@@ -77,23 +77,52 @@ export async function alreadyAlerted(kv: KVNamespace, resourceName: string): Pro
   return false;
 }
 
-export async function getKnownCustomerIds(kv: KVNamespace): Promise<string[]> {
+// GADS whitelist: each entry is a (customer_id + user_email) pair, so whitelisting a
+// legitimate automation tool on one account silences THAT actor on THAT account only,
+// not every alert for the client. Stored as an array under WHITELIST_KEY.
+export interface GadsWhitelistEntry {
+  customer_id: string;
+  user_email: string;
+  label?: string;
+}
+
+export async function getGadsWhitelist(kv: KVNamespace): Promise<GadsWhitelistEntry[]> {
   const raw = await kv.get(WHITELIST_KEY);
   if (!raw) return [];
   try {
-    const parsed = JSON.parse(raw) as { known_customer_ids?: string[] };
-    return parsed.known_customer_ids ?? [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? (parsed as GadsWhitelistEntry[]) : [];
   } catch {
     return [];
   }
 }
 
-export async function addKnownCustomerId(kv: KVNamespace, customerId: string): Promise<void> {
-  const ids = await getKnownCustomerIds(kv);
-  if (!ids.includes(customerId)) {
-    ids.push(customerId);
-    await kv.put(WHITELIST_KEY, JSON.stringify({ known_customer_ids: ids }));
+function gadsKey(cid: string, email: string): string {
+  return `${cid}|${(email || "").toLowerCase()}`;
+}
+
+export async function isGadsWhitelisted(kv: KVNamespace, cid: string, email: string): Promise<boolean> {
+  const list = await getGadsWhitelist(kv);
+  return list.some((e) => gadsKey(e.customer_id, e.user_email) === gadsKey(cid, email));
+}
+
+export async function addGadsWhitelist(
+  kv: KVNamespace,
+  cid: string,
+  email: string,
+  label?: string,
+): Promise<void> {
+  const list = await getGadsWhitelist(kv);
+  if (!list.some((e) => gadsKey(e.customer_id, e.user_email) === gadsKey(cid, email))) {
+    list.push({ customer_id: cid, user_email: (email || "").toLowerCase(), label });
+    await kv.put(WHITELIST_KEY, JSON.stringify(list));
   }
+}
+
+export async function removeGadsWhitelist(kv: KVNamespace, cid: string, email: string): Promise<void> {
+  const list = await getGadsWhitelist(kv);
+  const next = list.filter((e) => gadsKey(e.customer_id, e.user_email) !== gadsKey(cid, email));
+  await kv.put(WHITELIST_KEY, JSON.stringify(next));
 }
 
 // Heartbeats from the endpoint agents (one record per device).
@@ -129,6 +158,7 @@ export interface WhitelistPayload {
   scope: "gads" | "endpoint";
   label: string; // human readable, shown on the confirmation page
   customer_id?: string; // for gads alerts
+  user_email?: string; // for gads alerts (whitelist the actor on that account)
   device_id?: string; // for endpoint alerts
   pattern?: string; // for endpoint alerts (binary hash, extension id, ip, etc.)
 }
@@ -176,6 +206,33 @@ export async function addDeviceWhitelistPattern(
     list.push(pattern);
     await kv.put("dwl:" + deviceId, JSON.stringify(list), { expirationTtl: 30 * 24 * 3600 });
   }
+}
+
+export async function removeDeviceWhitelistPattern(
+  kv: KVNamespace,
+  deviceId: string,
+  pattern: string,
+): Promise<void> {
+  const list = (await getDeviceWhitelist(kv, deviceId)).filter((p) => p !== pattern);
+  await kv.put("dwl:" + deviceId, JSON.stringify(list), { expirationTtl: 30 * 24 * 3600 });
+}
+
+// Lists every device's whitelisted patterns (for the admin management page).
+export async function listDeviceWhitelists(
+  kv: KVNamespace,
+): Promise<{ device_id: string; patterns: string[] }[]> {
+  const out: { device_id: string; patterns: string[] }[] = [];
+  let cursor: string | undefined;
+  do {
+    const page = await kv.list({ prefix: "dwl:", cursor });
+    for (const k of page.keys) {
+      const deviceId = k.name.slice("dwl:".length);
+      const patterns = await getDeviceWhitelist(kv, deviceId);
+      if (patterns.length) out.push({ device_id: deviceId, patterns });
+    }
+    cursor = page.list_complete ? undefined : page.cursor;
+  } while (cursor);
+  return out;
 }
 
 // Endpoint alert timeline: every endpoint alert is recorded here so a Google Ads

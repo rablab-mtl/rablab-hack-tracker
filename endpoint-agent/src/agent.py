@@ -87,8 +87,8 @@ def refresh_config(db: Database, sid: str, logger: logging.Logger, attempts: int
                 runtime = config.load_runtime_config()
                 runtime.update(remote)
                 config.save_runtime_config(runtime)
-                # Sync server-side whitelist into local DB (permanent silencing).
-                db.sync_whitelist(remote.get("whitelisted_patterns", []) or [])
+                # Mirror the server-side whitelist exactly (so un-whitelisting propagates).
+                db.set_whitelist(remote.get("whitelisted_patterns", []) or [])
                 return runtime
             logger.info(f"config refresh HTTP {r.status_code} (attempt {i + 1})")
         except (requests.RequestException, ValueError) as e:

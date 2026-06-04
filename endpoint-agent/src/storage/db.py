@@ -95,6 +95,16 @@ class Database:
         for p in patterns:
             self.add_whitelist(p)
 
+    def set_whitelist(self, patterns: list[str]) -> None:
+        """Replace the local whitelist with exactly the server-side list, so a pattern
+        removed from the whitelist (un-whitelisted by the admin) starts alerting again."""
+        with self._conn() as c:
+            c.execute("DELETE FROM whitelist")
+            c.executemany(
+                "INSERT OR IGNORE INTO whitelist (pattern, added) VALUES (?,?)",
+                [(p, time.time()) for p in patterns],
+            )
+
     # ----- iocs ---------------------------------------------------------
     def replace_iocs(self, items: list[tuple[str, str]]) -> None:
         """items = list of (value, kind). Replaces the whole IoC set."""
