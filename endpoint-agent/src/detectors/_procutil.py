@@ -14,7 +14,9 @@ from pathlib import Path
 
 import psutil
 
-# Processes legitimately allowed to touch the Chrome credential stores.
+# Browsers legitimately allowed to read their OWN credential stores. A whitelisted
+# name is trusted ONLY if the binary is validly signed (see _credential_access), so
+# malware masquerading as one of these (unsigned) is still flagged.
 WHITELIST_PROC_NAMES = {
     "google chrome",
     "google chrome helper",
@@ -25,6 +27,21 @@ WHITELIST_PROC_NAMES = {
     "chromium",
     "brave browser",
     "brave",
+    # Microsoft Edge (Chromium) - default browser on Windows, reads its own profile.
+    "msedge.exe",
+    "msedgewebview2.exe",
+    "microsoft edge",
+    "microsoft edge helper",
+    "microsoft edge helper (renderer)",
+    "microsoft edge helper (gpu)",
+    # Other Chromium-family browsers
+    "opera.exe",
+    "opera",
+    "opera gx",
+    "vivaldi.exe",
+    "vivaldi",
+    "arc",
+    "arc helper",
     # macOS system services that legitimately poke at preference/keychain files
     "cfprefsd",
     "mds",

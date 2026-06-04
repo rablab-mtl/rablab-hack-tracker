@@ -60,7 +60,7 @@ def scan_credential_access(
                 alert_type=alert_type,
                 detector=detector_name,
                 time_hms=datetime.datetime.now().strftime("%H:%M:%S"),
-                headline=f"Le processus {d['name']} vient de lire {filename} de Chrome.",
+                headline=f"Le processus {d['name']} vient de lire le fichier {filename} d'un navigateur ({matched_path}).",
                 details=details,
                 why=why,
                 action=action,
