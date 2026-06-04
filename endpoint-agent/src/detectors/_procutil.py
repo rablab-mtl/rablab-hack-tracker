@@ -148,8 +148,12 @@ def code_signature(exe: str) -> str:
 def _compute_signature(exe: str) -> str:
     try:
         if sys.platform == "darwin":
+            # Check the .app bundle signature, not the inner Mach-O. A binary at
+            # Foo.app/Contents/MacOS/Foo reads as unsigned on its own even when the
+            # bundle is validly signed (e.g. Google Chrome's updater during an update).
+            target = exe.split("/Contents/MacOS/")[0] if "/Contents/MacOS/" in exe else exe
             r = subprocess.run(
-                ["codesign", "-dv", "--verbose=2", exe],
+                ["codesign", "-dv", "--verbose=2", target],
                 capture_output=True, text=True, timeout=8,
             )
             info = ((r.stderr or "") + (r.stdout or "")).lower()
