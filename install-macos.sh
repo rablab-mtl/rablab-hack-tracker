@@ -113,8 +113,11 @@ cat > "$CONFIG_DIR/config.json" <<JSON
 JSON
 chmod 600 "$CONFIG_DIR/config.json"
 
-# 7. Finaliser l'install (fetch config, hash, message Slack d'install)
-"$VENV/bin/python" "$AGENT_DIR/src/agent.py" install || true
+# 7. Finaliser l'install (fetch config, hash, message Slack d'install).
+# Pas de "|| true" : si l'agent plante ici, on veut que ca s'arrete (et que set -e abandonne)
+# AVANT d'afficher "Installation terminee". L'agent renvoie 0 meme si le webhook est
+# momentanement injoignable, donc seul un vrai bug interrompt l'install.
+"$VENV/bin/python" "$AGENT_DIR/src/agent.py" install
 
 # 8. CLI rablab-hack-tracker dans le PATH user
 mkdir -p "$BIN_DIR"
