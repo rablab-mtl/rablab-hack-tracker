@@ -13,10 +13,10 @@ WORKER_URL="https://rablab-gads-monitor.rablab.workers.dev"
 
 echo "=== rablab-hack-tracker : installation (macOS) ==="
 
-# 1. Obtenir Python 3.9+ en UNE etape, sans action utilisateur.
-# On evite d'executer le shim 'python3' nu (il declenche l'installeur Xcode). On ne teste
-# que des interpreteurs versionnes ou installes (brew / python.org). Si rien n'est trouve,
-# on installe automatiquement un Python dedie via uv (pas de sudo, pas de Xcode, pas de Homebrew).
+# 1. Trouver un Python 3.9+ deja present, SANS declencher l'installeur Xcode.
+# On ne teste que des interpreteurs versionnes ou installes (brew / python.org), et 'python3'
+# seulement si les Command Line Tools sont deja la. Si rien n'est utilisable, on guide
+# l'utilisateur (voir plus bas) plutot que de declencher Xcode et risquer un Python casse.
 PYBIN=""
 for cand in python3.13 python3.12 python3.11 python3.10 python3.9 \
             /opt/homebrew/bin/python3 /usr/local/bin/python3; do
@@ -35,20 +35,23 @@ if [ -z "$PYBIN" ] && xcode-select -p >/dev/null 2>&1 && command -v python3 >/de
   if [ "$major" = "3" ] && [ "$minor" -ge 9 ] 2>/dev/null; then PYBIN="python3"; fi
 fi
 
-if [ -z "$PYBIN" ]; then
-  echo "Aucun Python detecte : installation automatique d'un Python dedie (uv)..."
-  export PATH="$HOME/.local/bin:$PATH"
-  if ! command -v uv >/dev/null 2>&1; then
-    curl -LsSf https://astral.sh/uv/install.sh | sh >/dev/null 2>&1 || {
-      echo "Echec du telechargement de uv. Verifie ta connexion et relance."; exit 1; }
-    export PATH="$HOME/.local/bin:$PATH"
-  fi
-  uv python install 3.12 >/dev/null 2>&1 || true
-  PYBIN="$(uv python find 3.12 2>/dev/null)"
-fi
-
+# Si aucun Python utilisable, on NE tente PAS d'en installer un en silence : sur macOS,
+# meme uv requiert les outils Apple (install_name_tool), donc ca declenche Xcode et laisse
+# un Python casse si l'install Apple echoue. On guide vers la solution fiable, puis l'utilisateur
+# relance la commande (un Mac qui a deja Python ou les outils Apple n'arrive jamais ici).
 if [ -z "$PYBIN" ] || ! "$PYBIN" --version >/dev/null 2>&1; then
-  echo "Impossible d'obtenir Python automatiquement. Contacte l'admin."
+  echo ""
+  echo "Aucun Python utilisable sur ce Mac. Une seule etape, une seule fois :"
+  echo ""
+  echo "  Option 1 (la plus fiable) : installe Python depuis"
+  echo "     https://www.python.org/downloads/macos/"
+  echo "     (bouton Download, ouvre le .pkg, suis les etapes), PUIS relance cette commande."
+  echo ""
+  echo "  Option 2 : installe les outils Apple avec   xcode-select --install"
+  echo "     (clique Installer, attends la fin), PUIS relance cette commande."
+  echo ""
+  echo "  Si une fenetre Apple dit 'non disponible depuis le serveur de mise a jour' :"
+  echo "  c'est un pepin temporaire d'Apple, utilise l'Option 1 (python.org)."
   exit 1
 fi
 echo "Python : $("$PYBIN" --version)"
