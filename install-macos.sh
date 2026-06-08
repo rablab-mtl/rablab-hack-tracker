@@ -85,10 +85,21 @@ rm -f "$TGZ"
 "$VENV/bin/pip" install -q --upgrade pip
 "$VENV/bin/pip" install -q -r "$AGENT_DIR/requirements.txt"
 
-# 4. UNE seule question : email Rablab
-echo ""
-read -r -p "Quel est ton email Rablab ? (ex : prenom.n@rablab.ca) > " EMAIL </dev/tty
-if [ -z "$EMAIL" ]; then echo "Email vide, annulation."; exit 1; fi
+# 4. Email Rablab : accepte en argument (curl ... | bash -s -- ton.email@rablab.ca),
+# sinon demande de facon interactive.
+EMAIL="${1:-}"
+# Si l'argument ne ressemble pas a un email, on l'ignore et on demande de facon interactive.
+case "$EMAIL" in *@*.*) : ;; *) EMAIL="" ;; esac
+if [ -z "$EMAIL" ]; then
+  echo ""
+  read -r -p "Quel est ton email Rablab ? (ex : prenom.n@rablab.ca) > " EMAIL </dev/tty
+  case "$EMAIL" in *@*.*) : ;; *) EMAIL="" ;; esac
+fi
+if [ -z "$EMAIL" ]; then
+  echo "Email manquant. Relance ainsi :"
+  echo "  curl -fsSL https://raw.githubusercontent.com/rablab-mtl/rablab-hack-tracker/main/install-macos.sh | bash -s -- ton.email@rablab.ca"
+  exit 1
+fi
 
 # 5. Disclaimer Loi 25
 echo ""
