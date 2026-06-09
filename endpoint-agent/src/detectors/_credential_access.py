@@ -28,10 +28,11 @@ def scan_credential_access(
     for proc, matched_path in _procutil.processes_holding(paths):
         d = _procutil.proc_details(proc)
         name = d["name"]
-        # Trust a whitelisted name ONLY if the binary is properly signed. Malware commonly
-        # masquerades under a legit system process name (e.g. mdworker_shared) from a user
-        # directory; that copy is not Apple-signed, so we still alert on it.
-        if _procutil.is_whitelisted_proc(name) and _procutil.signature_trusted(d["signature"]):
+        # A known browser/system process is trusted UNLESS its binary is explicitly unsigned.
+        # We only distrust "unsigned" (a verified impostor, e.g. the fake mdworker_shared on
+        # Anna's Mac), not "unknown" (signature couldn't be read, e.g. Edge whose exe path is
+        # not visible) - otherwise a browser reading its own store false-positives constantly.
+        if _procutil.is_whitelisted_proc(name) and d["signature"] != "unsigned":
             continue
 
         # dedup_key on the binary hash when we have it, else the exe path.

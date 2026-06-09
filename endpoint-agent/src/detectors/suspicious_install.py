@@ -36,6 +36,18 @@ VENDOR_UPDATER_PARENTS = (
     "com.microsoft", "msupdate", "microsoft autoupdate",
 )
 
+# Some updaters (e.g. Microsoft AutoUpdate cloning Teams) run the helper with a plain
+# parent like bash, so we also recognise known vendor-updater dirs in the BINARY PATH.
+# Kept SPECIFIC on purpose: "com.apple." is excluded because the real stealer on Anna's
+# Mac hid under ".com.apple.metadata...", which must keep being flagged.
+VENDOR_PATH_HINTS = (
+    "com.microsoft.autoupdate",
+    "com.adobe.armdc",
+    "com.adobe.acc",
+    "googlesoftwareupdate",
+    "com.google.keystone",
+)
+
 
 def _from_temp(exe: str) -> bool:
     low = (exe or "").lower()
@@ -63,6 +75,9 @@ class SuspiciousInstallDetector(Detector):
             except (psutil.Error, OSError):
                 continue
             if not _from_temp(exe) or _in_applications(exe):
+                continue
+            # Inside a known vendor-updater dir -> legit update payload, skip.
+            if any(h in exe.lower() for h in VENDOR_PATH_HINTS):
                 continue
 
             sig = _procutil.code_signature(exe)
