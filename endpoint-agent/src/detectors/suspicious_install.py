@@ -26,6 +26,16 @@ TEMP_HINTS = (
 
 INSTALLER_PARENTS = {"installer", "installer.app", "package_script_service", "msiexec.exe", "msiexec"}
 
+# Known vendor updaters legitimately extract+run helper binaries from temp dirs (e.g. Adobe's
+# ARMDCHammer, Google's updater, Microsoft AutoUpdate). If the PARENT process is one of these,
+# the temp binary is an update payload, not a fake installer. Real stealers are spawned by
+# launchd / Installer / a shell, not by a vendor updater.
+VENDOR_UPDATER_PARENTS = (
+    "com.adobe", "armdc", "adobe acrobat updater",
+    "googlesoftwareupdate", "com.google", "google updater",
+    "com.microsoft", "msupdate", "microsoft autoupdate",
+)
+
 
 def _from_temp(exe: str) -> bool:
     low = (exe or "").lower()
@@ -60,7 +70,11 @@ class SuspiciousInstallDetector(Detector):
                 continue  # validly signed binary from temp is unusual but not alone alarming
 
             d = _procutil.proc_details(proc)
-            parent_is_installer = (d["parent"] or "").lower() in INSTALLER_PARENTS
+            parent_low = (d["parent"] or "").lower()
+            # Spawned by a known vendor updater -> legit update payload, not a fake installer.
+            if any(h in parent_low for h in VENDOR_UPDATER_PARENTS):
+                continue
+            parent_is_installer = parent_low in INSTALLER_PARENTS
 
             details = [
                 f"Processus : {d['name']} (PID {d['pid']})",
