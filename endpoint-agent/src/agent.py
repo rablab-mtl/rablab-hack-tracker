@@ -213,38 +213,47 @@ def run_loop() -> int:
     hb.push_worker()
 
     while True:
-        now = time.monotonic()
-        learning = (time.time() - install_ts) < LEARNING_WINDOW_SECONDS
+        # The ENTIRE iteration is wrapped: no unhandled error may ever exit the loop.
+        # On Windows the autostart (Run key) only relaunches at logon, not on crash, so a
+        # dead process stays dead for days. This catch-all keeps the agent alive no matter what.
+        try:
+            now = time.monotonic()
+            learning = (time.time() - install_ts) < LEARNING_WINDOW_SECONDS
 
-        for d in detectors:
-            if now < next_run[d.name]:
-                continue
-            next_run[d.name] = now + d.interval
+            for d in detectors:
+                if now < next_run[d.name]:
+                    continue
+                next_run[d.name] = now + d.interval
+                try:
+                    for alert in d.run_once():
+                        handle_alert(alert, db, notifier, learning, logger)
+                except Exception as e:  # one detector must never kill the loop
+                    logger.info(f"detector {d.name} raised: {e}")
+
+            if now >= next_ioc:
+                next_ioc = now + IOC_REFRESH_SECONDS
+                try:
+                    update_iocs(db, runtime.get("ioc_feeds"))
+                except Exception as e:
+                    logger.info(f"IoC refresh failed: {e}")
+
+            if now >= next_cfg:
+                runtime = refresh_config(db, sid, logger)
+                next_cfg = now + float(runtime.get("config_refresh_interval_seconds", 3600))
+                notifier.webhook_url = runtime.get("webhook_url", notifier.webhook_url)
+                if runtime.get("kill_switch"):
+                    do_kill_switch(notifier, logger)
+                    return 0
+
+            if now >= next_hb:
+                next_hb = now + WORKER_HEARTBEAT_SECONDS
+                hb.push_worker()
+            hb.maybe_send_daily_slack()
+        except Exception as e:
             try:
-                for alert in d.run_once():
-                    handle_alert(alert, db, notifier, learning, logger)
-            except Exception as e:  # one detector must never kill the loop
-                logger.info(f"detector {d.name} raised: {e}")
-
-        if now >= next_ioc:
-            next_ioc = now + IOC_REFRESH_SECONDS
-            try:
-                update_iocs(db, runtime.get("ioc_feeds"))
-            except Exception as e:
-                logger.info(f"IoC refresh failed: {e}")
-
-        if now >= next_cfg:
-            runtime = refresh_config(db, sid, logger)
-            next_cfg = now + float(runtime.get("config_refresh_interval_seconds", 3600))
-            notifier.webhook_url = runtime.get("webhook_url", notifier.webhook_url)
-            if runtime.get("kill_switch"):
-                do_kill_switch(notifier, logger)
-                return 0
-
-        if now >= next_hb:
-            next_hb = now + WORKER_HEARTBEAT_SECONDS
-            hb.push_worker()
-        hb.maybe_send_daily_slack()
+                logger.info(f"loop iteration error (continuing): {e}")
+            except Exception:
+                pass
 
         time.sleep(2)
 
